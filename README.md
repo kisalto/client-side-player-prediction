@@ -1,6 +1,7 @@
 # projeto-secreto
 
-
+## Executar treinamento:
+````
 # 1. Gera os dados fakes
 python training/generate_synthetic_data.py --sessions 50 --out data/raw
 
@@ -12,3 +13,4 @@ python training/train_model.py --dataset dataset.csv --out model.pkl
 
 # 4. Exporta para a Web
 python training/export_onnx.py --model model.pkl --dataset dataset.csv --out model.onnx
+```
