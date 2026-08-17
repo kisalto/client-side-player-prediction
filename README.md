@@ -1,7 +1,12 @@
 # projeto-secreto
 
+# Pré-requisitos
+```
+pip install pandas numpy scikit-learn skl2onnx
+```
+
 ## Executar treinamento:
-````
+```
 # 1. Gera os dados fakes
 python training/generate_synthetic_data.py --sessions 50 --out data/raw
 
