@@ -1,6 +1,8 @@
 # Personal
+mod/*/
+BepInEx/
 .vscode
-game/
+game*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
