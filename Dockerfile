@@ -9,10 +9,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY telemetry.proto .
+COPY ["training/Phase 2/telemetry.proto", "."]
 RUN python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. telemetry.proto
 
-COPY telemetry_service.py .
+COPY ["training/Phase 2/telemetry_service.py", "."]
 
 EXPOSE 50051
 ENV TELEMETRY_DSN="dbname=telemetry user=postgres password=postgres host=postgres"

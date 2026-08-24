@@ -14,8 +14,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\training\1 - TelemetryLogger.cs" />
-    <Compile Include="..\training\2 - Plugin.cs" /> <!-- Adicione esta linha -->
+    <Compile Include="..\training\Phase 1\TelemetryLogger.cs" />
+    <Compile Include="..\training\Phase 1\Plugin.cs" />
   </ItemGroup>
 
   <ItemGroup>
