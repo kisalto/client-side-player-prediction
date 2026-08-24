@@ -103,7 +103,7 @@ python training/4_telemetry_service.py --port 50051 \
 	--dsn "dbname=telemetry user=postgres password=postgres host=localhost"
 ```
 
-### Executar a pipeline de treinamento
+### Executar a **antiga** pipeline de treinamento
 Os scripts de treinamento ficam em `old/`:
 ```
 # 1. Gera dados sintéticos
