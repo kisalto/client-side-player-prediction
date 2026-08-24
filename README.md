@@ -26,7 +26,6 @@ O fluxo atual é:
 - **BepInEx**: carregamento do mod
 - **Python**: serviço gRPC
 - **gRPC / Protocol Buffers**: comunicação entre o jogo e o serviço
-- **PostgreSQL**: armazenamento de sessões, frames e eventos
 - **PostgreSQL**: armazenamento de sessões, frames e eventos em tabelas relacionais, com inimigos e projéteis em JSONB
 
 ---
@@ -93,12 +92,12 @@ TELEMETRY_DSN="dbname=telemetry user=postgres password=postgres host=localhost"
 ### Iniciar o serviço gRPC
 ```
 python "training/Phase 2/telemetry_service.py" --port 50051 --dsn "dbname=telemetry user=postgres password=postgres host=localhost"
+```
 
 ### Usar Docker
 O `docker compose` inicia PostgreSQL, cria o schema e executa o serviço gRPC:
 ```
 docker compose up --build
-```
 ```
 
 ### Scripts históricos
