@@ -2,7 +2,8 @@
 mod/*/
 BepInEx/
 .vscode
-game*/
+game/
+game-code/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

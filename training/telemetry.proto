@@ -1,0 +1,157 @@
+// telemetry.proto
+// ---------------------------------------------------------------------------
+// Fase 2: contrato gRPC entre o jogo (C#) e o Telemetry Service.
+// As mensagens espelham exatamente os DTOs de TelemetryLogger.cs
+// (TelemetrySession/TelemetrySnapshot/EntitySnapshot/BulletSnapshot/
+// TelemetryEvent) -- qualquer campo novo que voce adicionar la, replique aqui
+// com um NUMERO DE CAMPO NOVO (nunca reaproveite/renumere um campo antigo,
+// isso quebra compatibilidade com dados ja gravados).
+//
+// DECISOES DE DESIGN
+// - SessionInfo vai UMA VEZ por stream (primeira mensagem), nao repetido em
+//   todo batch: o jogo manda 1 sessao = 1 stream gRPC aberto, e so os frames/
+//   eventos depois. Menos banda, e modela o fluxo real (o server sabe que a
+//   sessao comecou quando recebe esse oneof).
+// - Frames NAO sao mandados um por um: o TelemetryLogger.cs acumula e manda
+//   em lotes (TelemetryBatch) periodicamente (ex: a cada 1-2s ou N frames).
+//   Isso casa com o snapshot a 20Hz do logger -- mandar 1 mensagem gRPC a
+//   cada 50ms seria overhead desnecessario de rede pra este caso de uso
+//   (nao e um jogo competitivo em tempo real, e telemetria pra treinar
+//   modelo depois).
+// - Stream bidirecional (nao so client-streaming): o server manda um
+//   BatchAck de volta pra cada batch recebido. Alem de confirmar entrega,
+//   isso da uma metrica de round-trip gratis, que vai ser util na Fase 9
+//   (testes de latencia/jitter/perda).
+// - Tambem existe um RPC unario SendBatch, pra casos que nao precisam de
+//   stream (ex: reenviar um .json exportado manualmente com F9 via um
+//   script Python/CLI de importacao, sem precisar simular uma sessao ao
+//   vivo).
+
+syntax = "proto3";
+
+package telemetry;
+
+option csharp_namespace = "Telemetry.Grpc";
+
+// ---------------------------------------------------------------------------
+// Estado por frame (espelha TelemetrySnapshot em TelemetryLogger.cs)
+// ---------------------------------------------------------------------------
+
+message EntitySnapshot {
+  float x = 1;
+  float y = 2;
+  int32 health = 3;
+  int32 max_health = 4;
+  bool is_attacking = 5;
+  bool has_detected_player = 6;
+  float distance_to_player = 7;
+  bool is_being_knocked_back = 8;
+}
+
+message BulletSnapshot {
+  string tag = 1;   // pool tag: "EnemyProjectile", "BossBullet", "PortalBullet",
+                     // "TopPortalBullet", "HomingRocket" ou "SineRocket"
+  float x = 2;
+  float y = 3;
+  float vx = 4;
+  float vy = 5;
+  float w = 6;
+  float h = 7;
+}
+
+message TelemetrySnapshot {
+  float t = 1;  // segundos desde o inicio da sessao (Time.realtimeSinceStartup - sessionStartTime)
+
+  // jogador
+  float px = 2;
+  float py = 3;
+  float pvx = 4;
+  float pvy = 5;
+  bool is_grounded = 6;
+  bool is_climbing = 7;
+  bool is_facing_right = 8;
+  bool is_dashing = 9;
+  bool can_dash = 10;
+  bool is_attacking = 11;
+  bool is_blocking = 12;
+  bool is_blocking_up = 13;
+  bool is_parrying = 14;
+  int32 current_health = 15;
+  int32 max_health = 16;
+  bool is_invincible = 17;
+  bool is_alive = 18;
+
+  // boss (boss_active=false quando nenhum boss esta em luta ativa)
+  bool boss_active = 19;
+  float boss_x = 20;
+  float boss_y = 21;
+  int32 boss_health = 22;
+  int32 boss_max_health = 23;
+
+  repeated EntitySnapshot enemies = 24;
+  repeated BulletSnapshot bullets = 25;
+}
+
+message TelemetryEvent {
+  float t = 1;
+  string type = 2;    // "player_death", "player_hurt", "enemy_died", "boss_died_poll" etc
+                        // (mesmos strings que TelemetryLogger.cs.LogEvent() usa)
+  string extra = 3;    // contexto livre (ex: nome do inimigo/boss envolvido)
+}
+
+// ---------------------------------------------------------------------------
+// Envelope de sessao e transporte
+// ---------------------------------------------------------------------------
+
+message SessionInfo {
+  string session_id = 1;               // gerado pelo cliente (System.Guid.NewGuid()) no Start()
+  string player_id = 2;                 // opcional: id persistente do jogador (steam id, save slot etc); pode ficar vazio por enquanto
+  string game_version = 3;              // Application.version
+  string recorded_at = 4;               // ISO 8601 UTC, igual a DateTime.UtcNow.ToString("o")
+  float snapshot_interval_seconds = 5;  // igual ao snapshotInterval do TelemetryLogger
+  string client_platform = 6;           // Application.platform.ToString() -- util mais pra frente (Fase 11, testes de regiao/plataforma)
+}
+
+message TelemetryBatch {
+  repeated TelemetrySnapshot frames = 1;
+  repeated TelemetryEvent events = 2;
+  int32 batch_sequence = 3;   // numero incremental do batch dentro da sessao (0, 1, 2...) -- ajuda a
+                                // detectar perda/duplicacao/fora-de-ordem nos testes de latencia da Fase 9
+}
+
+// primeira mensagem do stream = session_start; todas as seguintes = batch
+message TelemetryStreamMessage {
+  oneof payload {
+    SessionInfo session_start = 1;
+    TelemetryBatch batch = 2;
+  }
+}
+
+message BatchAck {
+  int32 batch_sequence = 1;     // ecoa o batch_sequence recebido, pra o cliente casar ack com envio
+  int32 frames_received = 2;
+  int32 events_received = 3;
+  bool ok = 4;
+  string message = 5;           // erro/detalhe, vazio quando ok=true
+}
+
+message SendBatchRequest {
+  SessionInfo session = 1;   // aqui SIM manda a sessao inteira, ja que e uma chamada isolada (sem stream previo)
+  TelemetryBatch batch = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Servico
+// ---------------------------------------------------------------------------
+
+service TelemetryService {
+  // Fluxo principal: o jogo abre 1 stream por sessao de jogo, manda
+  // session_start uma vez, depois TelemetryBatch conforme acumula frames.
+  // O servidor confirma cada batch (nao precisa esperar a sessao terminar).
+  rpc StreamTelemetry(stream TelemetryStreamMessage) returns (stream BatchAck);
+
+  // Alternativa unaria: um batch avulso e completo (com sessao inclusa),
+  // sem precisar manter um stream aberto. Util pra reenviar um .json
+  // exportado manualmente (Fase 1, tecla F9) ou pra testes/scripts simples.
+  rpc SendBatch(SendBatchRequest) returns (BatchAck);
+}
