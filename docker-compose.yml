@@ -1,8 +1,10 @@
 # docker-compose.yml
 # ---------------------------------------------------------------------------
-# Sobe Postgres + TelemetryService juntos. Uso:
+# Sobe Postgres + TelemetryService juntos. Uso (a partir da raiz do repo):
 #   docker compose up --build
-# O jogo (rodando fora do Docker, no editor Unity) conecta em localhost:50051.
+# O jogo (tmwa-map, rodando fora do Docker) manda telemetria via UDP pra
+# bridge (ainda nao escrita -- ver telemetry/bridge/), que reenvia pra
+# localhost:50051 (esse TelemetryService).
 services:
   postgres:
     image: postgres:16
@@ -14,7 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./telemetry/service/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 3s
@@ -22,7 +24,9 @@ services:
       retries: 10
 
   telemetry-service:
-    build: .
+    build:
+      context: .
+      dockerfile: telemetry/service/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy

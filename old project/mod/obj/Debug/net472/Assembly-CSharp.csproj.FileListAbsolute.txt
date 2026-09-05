@@ -1,0 +1,8 @@
+C:\Users\User\Documents\lixo\projeto-secreto\mod\bin\Debug\net472\Assembly-CSharp-Mod.dll
+C:\Users\User\Documents\lixo\projeto-secreto\mod\bin\Debug\net472\Assembly-CSharp-Mod.pdb
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp.csproj.AssemblyReference.cache
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp.csproj.CoreCompileInputs.cache
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp.sourcelink.json
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp-Mod.dll
+C:\Users\User\Documents\lixo\projeto-secreto\mod\obj\Debug\net472\Assembly-CSharp-Mod.pdb

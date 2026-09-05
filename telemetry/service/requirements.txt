@@ -1,0 +1,3 @@
+grpcio==1.83.0
+grpcio-tools==1.83.0
+psycopg2-binary==2.9.12
