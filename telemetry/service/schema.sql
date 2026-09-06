@@ -1,59 +1,44 @@
 -- schema.sql
 -- ---------------------------------------------------------------------------
--- Schema do banco de telemetria. enemies/bullets ficam como JSONB porque sao
--- listas de tamanho variavel por frame (numero de inimigos/projeteis na tela
--- muda o tempo todo) -- normalizar isso em tabelas separadas so complicaria
--- consultas sem trazer beneficio real aqui, ja que a Fase 4 (build_dataset.py)
--- vai ler essas colunas inteiras pra fazer feature engineering em Python de
--- qualquer forma (mesma logica que ja usamos no toho-like-js com o campo
--- "bullets" do JSON).
+-- Schema simplificado pro tmwa (ver telemetry.proto pro historico da
+-- mudanca). Uma unica tabela de eventos: "snapshot" (periodico) e
+-- "player_hurt"/"player_death" (pontuais) convivem na mesma tabela,
+-- distinguidos por event_type -- nao ha mais necessidade de separar
+-- frames/events como no schema antigo, ja que nao existe mais estado
+-- aninhado (enemies/bullets) pra justificar colunas JSONB.
 
 CREATE TABLE IF NOT EXISTS sessions (
-    session_id                 TEXT PRIMARY KEY,
-    player_id                  TEXT,
-    game_version                TEXT,
-    recorded_at                 TIMESTAMPTZ,
-    snapshot_interval_seconds  REAL,
-    client_platform             TEXT,
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
+    session_id      TEXT PRIMARY KEY,
+    game_version    TEXT,
+    recorded_at     TIMESTAMPTZ,
+    bridge_host     TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS frames (
+CREATE TABLE IF NOT EXISTS player_events (
     id                  BIGSERIAL PRIMARY KEY,
     session_id          TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     batch_sequence      INT,
-    t                   REAL NOT NULL,
+    bridge_recv_time    DOUBLE PRECISION NOT NULL,  -- epoch seconds, atribuido pela bridge
 
-    -- jogador
-    px REAL, py REAL, pvx REAL, pvy REAL,
-    is_grounded BOOLEAN, is_climbing BOOLEAN, is_facing_right BOOLEAN,
-    is_dashing BOOLEAN, can_dash BOOLEAN,
-    is_attacking BOOLEAN, is_blocking BOOLEAN, is_blocking_up BOOLEAN, is_parrying BOOLEAN,
-    current_health INT, max_health INT,
-    is_invincible BOOLEAN, is_alive BOOLEAN,
+    event_type          TEXT NOT NULL,   -- 'snapshot' | 'player_hurt' | 'player_death' | 'player_move_cmd' | 'player_attack'
+    char_id             BIGINT NOT NULL,
+    x                   INT,             -- posicao atual (todos os event_type)
+    y                   INT,
+    hp                  INT,
+    max_hp              INT,
+    dead                BOOLEAN,
+    extra               INT,             -- dano (hurt/death) ou 0 (demais)
 
-    -- boss
-    boss_active BOOLEAN, boss_x REAL, boss_y REAL,
-    boss_health INT, boss_max_health INT,
+    -- especificos de acao (NULL/sentinela quando nao se aplica ao event_type)
+    dest_x              INT,             -- so em player_move_cmd
+    dest_y              INT,
+    target_id           BIGINT,          -- so em player_attack
+    continuous          BOOLEAN,
 
-    -- listas de tamanho variavel (ver comentario no topo do arquivo)
-    enemies JSONB NOT NULL DEFAULT '[]'::jsonb,
-    bullets JSONB NOT NULL DEFAULT '[]'::jsonb,
-
-    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    inserted_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_frames_session_t ON frames (session_id, t);
-
-CREATE TABLE IF NOT EXISTS events (
-    id              BIGSERIAL PRIMARY KEY,
-    session_id      TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-    batch_sequence  INT,
-    t               REAL NOT NULL,
-    type            TEXT NOT NULL,
-    extra           TEXT,
-    inserted_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_session_t ON events (session_id, t);
-CREATE INDEX IF NOT EXISTS idx_events_type ON events (type);
+CREATE INDEX IF NOT EXISTS idx_player_events_session_time ON player_events (session_id, bridge_recv_time);
+CREATE INDEX IF NOT EXISTS idx_player_events_char ON player_events (char_id, bridge_recv_time);
+CREATE INDEX IF NOT EXISTS idx_player_events_type ON player_events (event_type);

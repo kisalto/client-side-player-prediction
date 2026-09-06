@@ -2,9 +2,9 @@
 # ---------------------------------------------------------------------------
 # Sobe Postgres + TelemetryService juntos. Uso (a partir da raiz do repo):
 #   docker compose up --build
-# O jogo (tmwa-map, rodando fora do Docker) manda telemetria via UDP pra
-# bridge (ainda nao escrita -- ver telemetry/bridge/), que reenvia pra
-# localhost:50051 (esse TelemetryService).
+# O jogo (tmwa-map) manda telemetria via UDP pra bridge (telemetry/bridge/,
+# roda separado, tipicamente na mesma maquina/regiao do tmwa-map), que
+# reenvia pra localhost:50051 (esse TelemetryService).
 services:
   postgres:
     image: postgres:16

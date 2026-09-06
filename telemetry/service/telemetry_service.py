@@ -1,15 +1,9 @@
 """
 telemetry_service.py
 ---------------------------------------------------------------------------
-Fase 2: servidor gRPC que recebe telemetria do jogo (via telemetry.proto) e
-grava no PostgreSQL.
-
-Implementa os dois RPCs definidos em TelemetryService:
-- StreamTelemetry: stream bidirecional. Primeira mensagem = SessionInfo
-  (grava/atualiza a sessao). Mensagens seguintes = TelemetryBatch (grava
-  frames + eventos em lote, responde um BatchAck por batch).
-- SendBatch: RPC unario, manda SessionInfo + TelemetryBatch de uma vez so
-  (usado por scripts/CLIs que nao querem manter um stream aberto).
+Servidor gRPC que recebe telemetria da bridge (telemetry/bridge/) e grava no
+PostgreSQL. Ver telemetry.proto pro contrato e docs/architecture.md pro
+desenho geral (tmwa-map --UDP--> bridge --gRPC--> aqui --> Postgres).
 
 Uso:
     python telemetry_service.py --port 50051 \
@@ -18,7 +12,6 @@ Uso:
 Ou via variavel de ambiente TELEMETRY_DSN (mais pratico com Docker).
 """
 import argparse
-import json
 import logging
 import os
 from concurrent import futures
@@ -34,50 +27,19 @@ import telemetry_pb2_grpc as pb_grpc
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger('telemetry_service')
 
-FRAME_COLUMNS = [
-    'session_id', 'batch_sequence', 't',
-    'px', 'py', 'pvx', 'pvy',
-    'is_grounded', 'is_climbing', 'is_facing_right',
-    'is_dashing', 'can_dash',
-    'is_attacking', 'is_blocking', 'is_blocking_up', 'is_parrying',
-    'current_health', 'max_health',
-    'is_invincible', 'is_alive',
-    'boss_active', 'boss_x', 'boss_y', 'boss_health', 'boss_max_health',
-    'enemies', 'bullets',
+EVENT_COLUMNS = [
+    'session_id', 'batch_sequence', 'bridge_recv_time',
+    'event_type', 'char_id', 'x', 'y', 'hp', 'max_hp', 'dead', 'extra',
+    'dest_x', 'dest_y', 'target_id', 'continuous',
 ]
 
-EVENT_COLUMNS = ['session_id', 'batch_sequence', 't', 'type', 'extra']
 
-
-def _entity_to_dict(e):
-    return {
-        'x': e.x, 'y': e.y, 'health': e.health, 'max_health': e.max_health,
-        'is_attacking': e.is_attacking, 'has_detected_player': e.has_detected_player,
-        'distance_to_player': e.distance_to_player, 'is_being_knocked_back': e.is_being_knocked_back,
-    }
-
-
-def _bullet_to_dict(b):
-    return {'tag': b.tag, 'x': b.x, 'y': b.y, 'vx': b.vx, 'vy': b.vy, 'w': b.w, 'h': b.h}
-
-
-def _frame_row(session_id, batch_sequence, f):
+def _event_row(session_id, batch_sequence, e: 'pb.PlayerEvent'):
     return (
-        session_id, batch_sequence, f.t,
-        f.px, f.py, f.pvx, f.pvy,
-        f.is_grounded, f.is_climbing, f.is_facing_right,
-        f.is_dashing, f.can_dash,
-        f.is_attacking, f.is_blocking, f.is_blocking_up, f.is_parrying,
-        f.current_health, f.max_health,
-        f.is_invincible, f.is_alive,
-        f.boss_active, f.boss_x, f.boss_y, f.boss_health, f.boss_max_health,
-        json.dumps([_entity_to_dict(e) for e in f.enemies]),
-        json.dumps([_bullet_to_dict(b) for b in f.bullets]),
+        session_id, batch_sequence, e.bridge_recv_time,
+        e.event_type, e.char_id, e.x, e.y, e.hp, e.max_hp, e.dead, e.extra,
+        e.dest_x, e.dest_y, e.target_id, e.continuous,
     )
-
-
-def _event_row(session_id, batch_sequence, e):
-    return (session_id, batch_sequence, e.t, e.type, e.extra)
 
 
 class TelemetryServiceServicer(pb_grpc.TelemetryServiceServicer):
@@ -94,30 +56,22 @@ class TelemetryServiceServicer(pb_grpc.TelemetryServiceServicer):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO sessions (session_id, player_id, game_version, recorded_at,
-                                       snapshot_interval_seconds, client_platform)
-                VALUES (%s, %s, %s, NULLIF(%s, '')::timestamptz, %s, %s)
+                INSERT INTO sessions (session_id, game_version, recorded_at, bridge_host)
+                VALUES (%s, %s, NULLIF(%s, '')::timestamptz, %s)
                 ON CONFLICT (session_id) DO UPDATE SET
-                    player_id = EXCLUDED.player_id,
                     game_version = EXCLUDED.game_version,
-                    client_platform = EXCLUDED.client_platform
+                    bridge_host = EXCLUDED.bridge_host
                 """,
-                (session.session_id, session.player_id, session.game_version,
-                 session.recorded_at, session.snapshot_interval_seconds, session.client_platform),
+                (session.session_id, session.game_version, session.recorded_at, session.bridge_host),
             )
         conn.commit()
 
     def _insert_batch(self, conn, session_id, batch: 'pb.TelemetryBatch'):
         with conn.cursor() as cur:
-            if batch.frames:
-                rows = [_frame_row(session_id, batch.batch_sequence, f) for f in batch.frames]
-                psycopg2.extras.execute_values(
-                    cur, f"INSERT INTO frames ({', '.join(FRAME_COLUMNS)}) VALUES %s", rows,
-                )
             if batch.events:
                 rows = [_event_row(session_id, batch.batch_sequence, e) for e in batch.events]
                 psycopg2.extras.execute_values(
-                    cur, f"INSERT INTO events ({', '.join(EVENT_COLUMNS)}) VALUES %s", rows,
+                    cur, f"INSERT INTO player_events ({', '.join(EVENT_COLUMNS)}) VALUES %s", rows,
                 )
         conn.commit()
 
@@ -136,9 +90,6 @@ class TelemetryServiceServicer(pb_grpc.TelemetryServiceServicer):
 
                 if kind == 'batch':
                     if session_id is None:
-                        # cliente mandou um batch sem mandar session_start antes --
-                        # aceitamos mesmo assim com um session_id provisorio, mas
-                        # avisamos, porque isso normalmente indica bug no cliente.
                         session_id = 'unknown-session'
                         self._upsert_session(conn, pb.SessionInfo(session_id=session_id))
                         log.warning('batch recebido sem session_start previo -- usando "unknown-session"')
@@ -148,7 +99,6 @@ class TelemetryServiceServicer(pb_grpc.TelemetryServiceServicer):
                         self._insert_batch(conn, session_id, batch)
                         yield pb.BatchAck(
                             batch_sequence=batch.batch_sequence,
-                            frames_received=len(batch.frames),
                             events_received=len(batch.events),
                             ok=True,
                         )
@@ -169,7 +119,6 @@ class TelemetryServiceServicer(pb_grpc.TelemetryServiceServicer):
             self._insert_batch(conn, request.session.session_id, request.batch)
             return pb.BatchAck(
                 batch_sequence=request.batch.batch_sequence,
-                frames_received=len(request.batch.frames),
                 events_received=len(request.batch.events),
                 ok=True,
             )

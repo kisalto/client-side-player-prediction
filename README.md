@@ -44,9 +44,9 @@ tmwa-ml-pipeline/
 |---|---|---|---|
 | 0 | Entender o jogo (tmwa + ManaVerse) | ✅ feito | (não é código, foi exploração) |
 | 1 | Telemetria no servidor (C++) | ✅ feito | fork do `tmwa`, `src/map/telemetry.*` |
-| 1.5 | Bridge UDP → gRPC | 🔲 a fazer | `telemetry/bridge/` |
-| 2 | `telemetry.proto` + `TelemetryService` | ✅ feito, testado ponta a ponta | `telemetry/proto/`, `telemetry/service/` |
-| 3 | Dataset sintético (novo, para o tmwa) | 🔲 a fazer | `pipeline/generate_synthetic_data.py` |
+| 1.5 | Bridge UDP → gRPC | ✅ feito, testado ponta a ponta | `telemetry/bridge/` |
+| 2 | `telemetry.proto` + `TelemetryService` | ✅ feito, testado ponta a ponta (schema atualizado pro formato real do tmwa) | `telemetry/proto/`, `telemetry/service/` |
+| 3 | Dataset sintético (novo, para o tmwa) | ✅ feito, testado (20 jogadores x 30min) | `pipeline/generate_synthetic_data.py` |
 | 4 | `build_dataset.py` (estado_t → ação_t+1) | 🔲 a fazer | `pipeline/build_dataset.py` |
 | 5 | Modelo baseline (Random Forest / XGBoost vs. aleatório) | 🔲 a fazer | `pipeline/train_model.py` |
 | 6 | MLP, depois LSTM/GRU se ajudar | 🔲 a fazer | `pipeline/train_model.py` |
