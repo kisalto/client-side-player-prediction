@@ -112,7 +112,7 @@ def build_rows_for_player(events):
                     'time_since_last_action': dt_since_action,
                     'time_since_last_hurt': (t - last_hurt_t) if last_hurt_t is not None else NO_HISTORY_SENTINEL,
                     'last_damage_taken': last_hurt_extra,
-                    'prev_action_type': last_action_type,
+                    'prev_action_was_attack': 1 if last_action_type == 'attack' else 0,
                     # -- labels (Y) --
                     'action_type': 'move' if is_move else 'attack',
                     'move_dx': (row.dest_x - row.x) if is_move else np.nan,

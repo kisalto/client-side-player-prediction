@@ -51,3 +51,24 @@ servidor confirmou".
   de todos os jogadores online (usado no snapshot periódico)
 - Padrão `Timer(tick, callback, interval).detach()` -- mesmo usado por
   `pc_natural_heal` -- para o snapshot periódico (500ms)
+
+## Fase 8: redefinição importante do escopo
+
+O plano original da Fase 8 era prever **direção de movimento** de
+entidades remotas, tipo Dead Reckoning/Smart Reckoning. Investigando o
+protocolo do `tmwa` no cliente (`net/tmwa/beingrecv.cpp`), achei que isso
+não se aplica: quando qualquer entidade começa a andar, o servidor já
+manda o **destino completo** (`dstX, dstY`) pra todo cliente por perto --
+não existe o problema de "adivinhar a direção" que Dead Reckoning resolve
+em outros protocolos (ex: World of Warcraft, alvo do paper do Smart
+Reckoning). Confirmei também que o próprio jogador local já tem
+client-side prediction otimista pro seu movimento (`LocalPlayer::
+setDestination` executa local + manda pro servidor ao mesmo tempo).
+
+**Redefinição**: usar o `model.onnx` pra prever a próxima **ação**
+(sobretudo ataque) de uma entidade remota um pouco antes do pacote real
+confirmar -- pra disparar uma pista visual antecipada (telegraph), sem
+fingir o resultado real (dano continua só confirmado pelo servidor).
+Reduz latência *percebida* sem comprometer a autoridade do servidor. Isso
+ainda usa exatamente o classificador treinado nas Fases 5-7 (move vs
+attack), só muda ONDE e PARA QUE ele é aplicado no cliente.

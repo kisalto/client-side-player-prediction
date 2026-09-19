@@ -73,21 +73,30 @@ def simulate_player(char_id, rng, duration_s):
         is_invuln = t < invuln_until
 
         if not is_invuln:
+            # atualiza a posicao PRIMEIRO (anda em direcao ao alvo atual);
+            # so depois decide se troca de alvo. Isso garante que
+            # player_move_cmd e player_attack usem a MESMA referencia de
+            # posicao (pos-movimento deste tick) -- se a ordem fosse
+            # invertida, todo move_cmd sairia com velocidade
+            # artificialmente igual a zero (viria sempre da posicao do
+            # tick anterior), o que da um sinal falso/trivial demais pro
+            # classificador aprender (ja aconteceu aqui, foi corrigido).
+            dx, dy = target_x - x, target_y - y
+            dist = math.hypot(dx, dy) + 1e-6
+            x = min(max(x + dx / dist * MOVE_SPEED, 0), MAP_W)
+            y = min(max(y + dy / dist * MOVE_SPEED, 0), MAP_H)
+
             # troca de alvo de vez em quando ou ao chegar perto -- da
             # autocorrelacao ao movimento (ver docstring do modulo). Cada
             # troca de alvo e o "comando de movimento" (player_move_cmd) --
             # equivalente ao clique de WalkToXY no jogo de verdade.
-            if rng.random() < 0.03 or math.hypot(target_x - x, target_y - y) < 2:
+            if rng.random() < 0.03 or dist < 2:
                 target_x, target_y = rng.uniform(0, MAP_W), rng.uniform(0, MAP_H)
                 events.append(_sentinel_action_fields({
                     't': t, 'event_type': 'player_move_cmd', 'x': round(x), 'y': round(y),
                     'hp': hp, 'max_hp': max_hp, 'dead': False, 'extra': 0,
                     'dest_x': round(target_x), 'dest_y': round(target_y),
                 }))
-            dx, dy = target_x - x, target_y - y
-            dist = math.hypot(dx, dy) + 1e-6
-            x = min(max(x + dx / dist * MOVE_SPEED, 0), MAP_W)
-            y = min(max(y + dy / dist * MOVE_SPEED, 0), MAP_H)
 
             if rng.random() < aggression:
                 # "encontro": metade das vezes o jogador reage atacando de
