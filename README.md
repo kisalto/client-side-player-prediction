@@ -29,7 +29,9 @@ tmwa-ml-pipeline/
 │   ├── raw/                       # exports reais de sessão (gitignored)
 │   └── synthetic/                 # dados sintéticos gerados localmente (gitignored)
 ├── pipeline/                      # generate_synthetic_data.py, build_dataset.py,
-│                                   # train_model.py, export_onnx.py (Fases 3-7 -- a fazer)
+│                                   # train_model.py, export_onnx.py (Fases 3-7 -- prontos)
+├── client/                        # Fase 8: beingactionpredictor.h/.cpp (ONNX Runtime C++)
+│                                   # + guia de integração no ManaVerse -- escrito, não compilado
 ├── experiments/
 │   ├── latency_injection/         # testes de latência/jitter/perda artificiais (Fase 9)
 │   └── bot_load/                  # testes com 50-100 bots simultâneos (Fase 10)
@@ -47,11 +49,11 @@ tmwa-ml-pipeline/
 | 1.5 | Bridge UDP → gRPC | ✅ feito, testado ponta a ponta | `telemetry/bridge/` |
 | 2 | `telemetry.proto` + `TelemetryService` | ✅ feito, testado ponta a ponta (schema atualizado pro formato real do tmwa) | `telemetry/proto/`, `telemetry/service/` |
 | 3 | Dataset sintético (novo, para o tmwa) | ✅ feito, testado (20 jogadores x 30min) | `pipeline/generate_synthetic_data.py` |
-| 4 | `build_dataset.py` (estado_t → ação_t+1) | 🔲 a fazer | `pipeline/build_dataset.py` |
-| 5 | Modelo baseline (Random Forest / XGBoost vs. aleatório) | 🔲 a fazer | `pipeline/train_model.py` |
-| 6 | MLP, depois LSTM/GRU se ajudar | 🔲 a fazer | `pipeline/train_model.py` |
-| 7 | Export para `model.onnx` | 🔲 a fazer | `pipeline/export_onnx.py` |
-| 8 | Previsão client-side (ManaVerse + ONNX Runtime C++) | 🔲 a fazer | repo do cliente (`manaverse-mirror`) |
+| 4 | `build_dataset.py` (estado_t → ação_t+1) | ✅ feito, testado (83k eventos → 5.5k linhas de ação) | `pipeline/build_dataset.py` |
+| 5 | Modelo baseline (Random Forest / XGBoost vs. aleatório) | ✅ feito, testado (RF 55,9% vs. 51,3% aleatório) | `pipeline/train_model.py` |
+| 6 | MLP, depois LSTM/GRU se ajudar | ✅ feito, testado (LSTM/GRU não superaram RF/MLP nos dados sintéticos -- achado válido) | `pipeline/train_model.py`, `pipeline/train_sequence_model.py` |
+| 7 | Export para `model.onnx` | ✅ feito, testado (labels/probs idênticos ao sklearn, diff ~1e-7) | `pipeline/export_onnx.py` |
+| 8 | Previsão client-side (ManaVerse + ONNX Runtime C++) | ✅ escrito e revisado, **não compilado** (cliente gráfico grande demais pro sandbox) | `client/` (`beingactionpredictor.h/.cpp` + guia de integração) |
 | 9 | Latência/jitter/perda artificiais | 🔲 a fazer | `experiments/latency_injection/` |
 | 10 | 50-100 bots simultâneos | 🔲 a fazer | `experiments/bot_load/` |
 | 11 | Multi-região (Foz → Edge SP → Costa Leste) | 🔲 a fazer | `experiments/` (pasta nova quando chegar lá) |
