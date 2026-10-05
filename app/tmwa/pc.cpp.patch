@@ -1,0 +1,54 @@
+--- a/src/map/pc.cpp
++++ b/src/map/pc.cpp
+@@ -43,6 +43,7 @@
+ #include "../mmo/cxxstdio_enums.hpp"
+ 
+ #include "../net/timer.hpp"
++#include "telemetry.hpp"
+ #include "../net/timestamp-utils.hpp"
+ 
+ #include "../proto2/char-map.hpp"
+@@ -2781,6 +2782,8 @@
+ 
+     nullpo_retz(sd);
+ 
++    telemetry_log_move_cmd(sd, x, y);
++
+     sd->to_x = x;
+     sd->to_y = y;
+ 
+@@ -3032,6 +3035,8 @@
+     sd->attacktarget = target_id;
+     sd->state.attack_continue = type;
+ 
++    telemetry_log_attack(sd, target_id._value, type != 0);
++
+     interval_t d = sd->attackabletime - gettick();
+     if (d > interval_t::zero() && d < 2_s)
+     {                           //攻撃delay中 | Attack delaying
+@@ -3553,6 +3558,7 @@
+     {
+         //まだ生きているならHP更新 | HP update if you're still alive
+         clif_updatestatus(sd, SP::HP);
++        telemetry_log_event(sd, "player_hurt", damage);
+ 
+         sd->canlog_tick = gettick();
+ 
+@@ -3570,6 +3576,7 @@
+     }
+ 
+     MAP_LOG_PC(sd, "DEAD%s"_fmt, ""_s);
++    telemetry_log_event(sd, "player_death", damage);
+ 
+     // Character is dead!
+ 
+@@ -5697,6 +5704,9 @@
+  */
+ void do_init_pc(void)
+ {
++    telemetry_init();
++    telemetry_start_snapshot_timer();
++
+     pc_calc_sigma();
+     natural_heal_prev_tick = gettick() + NATURAL_HEAL_INTERVAL;
+     Timer(natural_heal_prev_tick,
