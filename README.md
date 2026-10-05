@@ -1,75 +1,74 @@
-# tmwa-ml-pipeline
+# client-side-player-prediction
 
-Pipeline de telemetria, dataset e Machine Learning para previsão de ações do
-jogador (client-side prediction) aplicado ao [tmwa](https://github.com/kisalto/tmwa)
-(fork pessoal do servidor do [TheManaWorld](https://github.com/themanaworld/tmwa)).
+Previsão de ações do jogador com Machine Learning para compensação de
+latência em MMORPGs — estudo de caso no servidor `tmwa` (TheManaWorld) e
+no cliente ManaVerse.
 
-Este repositório é separado do fork do jogo de propósito: o `tmwa` é GPL-2.0+
-e só recebe a instrumentação mínima de telemetria; todo o resto do pipeline
-(infra, dataset, treino, export ONNX, experimentos de latência) mora aqui.
-
-## Repositórios relacionados
-
-- **Jogo (servidor)**: [kisalto/tmwa](https://github.com/kisalto/tmwa) — fork
-  do tmwa com os hooks de telemetria em `src/map/telemetry.{hpp,cpp}` e o
-  patch em `pc.cpp` (dano e morte do jogador).
-- **Jogo (cliente)**: [kisalto/manaverse-mirror](https://github.com/kisalto/manaverse-mirror)
-  — mirror do ManaVerse (só necessário a partir da Fase 8, previsão no
-  cliente; nada aqui depende dele ainda).
-
-## Estrutura
+## Estrutura deste repositório
 
 ```
-tmwa-ml-pipeline/
-├── telemetry/
-│   ├── proto/telemetry.proto      # contrato gRPC (Fase 2 -- pronto)
-│   ├── service/                   # TelemetryService: recebe gRPC, grava no Postgres (Fase 2 -- pronto, testado)
-│   └── bridge/                    # UDP (do tmwa-map) -> gRPC (Fase 1.5 -- a fazer)
-├── data/
-│   ├── raw/                       # exports reais de sessão (gitignored)
-│   └── synthetic/                 # dados sintéticos gerados localmente (gitignored)
-├── pipeline/                      # generate_synthetic_data.py, build_dataset.py,
-│                                   # train_model.py, export_onnx.py (Fases 3-7 -- prontos)
-├── client/                        # Fase 8: beingactionpredictor.h/.cpp (ONNX Runtime C++)
-│                                   # + guia de integração no ManaVerse -- escrito, não compilado
-├── experiments/
-│   ├── latency_injection/         # testes de latência/jitter/perda artificiais (Fase 9)
-│   └── bot_load/                  # testes com 50-100 bots simultâneos (Fase 10)
-├── docs/
-│   └── architecture.md            # diagrama e decisões de arquitetura
-└── docker-compose.yml             # sobe Postgres + TelemetryService localmente
+/
+├── app/                   # todo o código/pipeline (Python + patches C++) -- ver app/README.md
+├── TMWA/                  # clone do servidor (vazio no git -- so .gitkeep)
+├── manaverse-mirror/      # clone do cliente (vazio no git -- so .gitkeep)
+└── README.md              # este arquivo
 ```
 
-## Onde cada Fase do roadmap mora aqui
+`TMWA/` e `manaverse-mirror/` são **clones git de outros repositórios**
+(o jogo em si, GPL-2.0+) -- não ficam versionados aqui dentro, só os
+arquivos de integração (em `app/tmwa/` e `app/manaverse/`) que precisam
+ser copiados/aplicados neles.
 
-| Fase | Descrição | Status | Onde |
-|---|---|---|---|
-| 0 | Entender o jogo (tmwa + ManaVerse) | ✅ feito | (não é código, foi exploração) |
-| 1 | Telemetria no servidor (C++) | ✅ feito | fork do `tmwa`, `src/map/telemetry.*` |
-| 1.5 | Bridge UDP → gRPC | ✅ feito, testado ponta a ponta | `telemetry/bridge/` |
-| 2 | `telemetry.proto` + `TelemetryService` | ✅ feito, testado ponta a ponta (schema atualizado pro formato real do tmwa) | `telemetry/proto/`, `telemetry/service/` |
-| 3 | Dataset sintético (novo, para o tmwa) | ✅ feito, testado (20 jogadores x 30min) | `pipeline/generate_synthetic_data.py` |
-| 4 | `build_dataset.py` (estado_t → ação_t+1) | ✅ feito, testado (83k eventos → 5.5k linhas de ação) | `pipeline/build_dataset.py` |
-| 5 | Modelo baseline (Random Forest / XGBoost vs. aleatório) | ✅ feito, testado (RF 55,9% vs. 51,3% aleatório) | `pipeline/train_model.py` |
-| 6 | MLP, depois LSTM/GRU se ajudar | ✅ feito, testado (LSTM/GRU não superaram RF/MLP nos dados sintéticos -- achado válido) | `pipeline/train_model.py`, `pipeline/train_sequence_model.py` |
-| 7 | Export para `model.onnx` | ✅ feito, testado (labels/probs idênticos ao sklearn, diff ~1e-7) | `pipeline/export_onnx.py` |
-| 8 | Previsão client-side (ManaVerse + ONNX Runtime C++) | ✅ escrito e revisado, **não compilado** (cliente gráfico grande demais pro sandbox) | `client/` (`beingactionpredictor.h/.cpp` + guia de integração) |
-| 9 | Latência/jitter/perda artificiais | 🔲 a fazer | `experiments/latency_injection/` |
-| 10 | 50-100 bots simultâneos | 🔲 a fazer | `experiments/bot_load/` |
-| 11 | Multi-região (Foz → Edge SP → Costa Leste) | 🔲 a fazer | `experiments/` (pasta nova quando chegar lá) |
+## Setup de um clone novo
 
-## Rodando o TelemetryService localmente
+### 1. Clonar este repositório
 
 ```bash
-docker compose up --build
+git clone https://github.com/kisalto/client-side-player-prediction.git
+cd client-side-player-prediction
 ```
 
-Isso sobe Postgres (porta 5432) e o TelemetryService (porta 50051, gRPC).
-O schema é aplicado automaticamente na primeira subida
-(`telemetry/service/schema.sql` via `docker-entrypoint-initdb.d`).
+### 2. Clonar o TMWA (servidor) dentro de `TMWA/`
 
-## Licença
+```bash
+git clone https://github.com/themanaworld/tmwa.git TMWA
+```
 
-Código deste repositório: MIT (ajuste se preferir outra). Isso é
-independente da licença do jogo em si — o `tmwa` continua GPL-2.0+ no fork
-dele; nada daqui é derivado do código do jogo.
+Usamos o **upstream** oficial aqui (não o fork pessoal
+`kisalto/tmwa`), porque o patch em `app/tmwa/pc.cpp.patch` foi gerado e
+validado contra ele -- aplicar num fork que já tem outras mudanças
+pessoais pode gerar conflito. Se você quiser continuar usando seu fork
+pessoal diretamente, veja a nota em `app/tmwa/README.md`.
+
+### 3. Clonar o ManaVerse (cliente) dentro de `manaverse-mirror/`
+
+```bash
+git clone https://github.com/kisalto/manaverse-mirror.git manaverse-mirror
+```
+
+(Esse já é o seu próprio fork/mirror -- os hooks desta etapa já estão
+commitados nele, então o passo 4 vai detectar isso e pular a reaplicação
+automaticamente.)
+
+### 4. Copiar e aplicar os arquivos de integração
+
+```bash
+bash app/setup.sh
+```
+
+Esse script:
+- copia `app/tmwa/{telemetry.hpp,telemetry.cpp}` para `TMWA/src/map/` e
+  aplica `app/tmwa/pc.cpp.patch` (a menos que detecte que já está
+  aplicado);
+- copia `app/manaverse/{beingactionpredictor.h,beingactionpredictor.cpp}`
+  para `manaverse-mirror/src/ml/` e aplica
+  `app/manaverse/{being.cpp.patch,Makefile.am.patch}` (idem).
+
+É seguro rodar mais de uma vez (idempotente).
+
+### 5. Compilar e rodar o pipeline
+
+A partir daqui, siga:
+- `app/tmwa/README.md` -- compilar o servidor com telemetria
+- `app/manaverse/FASE8_INTEGRACAO.md` -- compilar o cliente com ONNX Runtime
+- `app/README.md` -- rodar o `TelemetryService`/Postgres e o pipeline Python (dataset, treino, export ONNX)

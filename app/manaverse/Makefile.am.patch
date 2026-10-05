@@ -1,0 +1,11 @@
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1030,6 +1030,8 @@
+ 	      particle/animationparticle.h \
+ 	      being/being.cpp \
+ 	      being/being.h \
++	      ml/beingactionpredictor.cpp \
++	      ml/beingactionpredictor.h \
+ 	      enums/being/beingaction.h \
+ 	      being/beingcacheentry.h \
+ 	      enums/being/beingdirection.h \
