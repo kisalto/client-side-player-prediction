@@ -46,9 +46,9 @@ pessoal diretamente, veja a nota em `app/tmwa/README.md`.
 git clone https://github.com/kisalto/manaverse-mirror.git manaverse-mirror
 ```
 
-(Esse já é o seu próprio fork/mirror -- os hooks desta etapa já estão
-commitados nele, então o passo 4 vai detectar isso e pular a reaplicação
-automaticamente.)
+(Esse já é o seu próprio fork/mirror e já tem os hooks da primeira
+versão commitados -- o passo 4 detecta isso e aplica só o que falta: o
+telegraph em `Being::logic()` e o `init()` do modelo no boot.)
 
 ### 4. Copiar e aplicar os arquivos de integração
 
@@ -61,8 +61,9 @@ Esse script:
   aplica `app/tmwa/pc.cpp.patch` (a menos que detecte que já está
   aplicado);
 - copia `app/manaverse/{beingactionpredictor.h,beingactionpredictor.cpp}`
-  para `manaverse-mirror/src/ml/` e aplica
-  `app/manaverse/{being.cpp.patch,Makefile.am.patch}` (idem).
+  para `manaverse-mirror/src/ml/` e aplica os 4 patches de
+  `app/manaverse/` (`being.cpp`, `Makefile.am`, `being-telegraph`, `client.cpp`),
+  cada um só se ainda não estiver aplicado (idem).
 
 É seguro rodar mais de uma vez (idempotente).
 
@@ -72,3 +73,49 @@ A partir daqui, siga:
 - `app/tmwa/README.md` -- compilar o servidor com telemetria
 - `app/manaverse/FASE8_INTEGRACAO.md` -- compilar o cliente com ONNX Runtime
 - `app/README.md` -- rodar o `TelemetryService`/Postgres e o pipeline Python (dataset, treino, export ONNX)
+
+## Mudanças pendentes encontradas numa inspeção do repositório (29/09)
+
+Isso foi corrigido nesta própria reorganização, mas fica registrado aqui
+pra contexto:
+
+1. **`pc.cpp` do fork pessoal (`kisalto/tmwa`) estava incompleto**: tinha
+   os hooks de dano/morte/init, mas não os de comando de movimento
+   (`pc_walktoxy`) nem de ataque (`pc_attack`) -- mesmo o
+   `telemetry.hpp`/`.cpp` de lá já tendo essas funções prontas desde a
+   Fase 4/6. Sem eles, nenhum dado de ação real seria coletado. Ver
+   detalhes em `app/tmwa/README.md`.
+2. **`app/manaverse/FASE8_INTEGRACAO.md` estava desatualizado**: ainda
+   instruía a mexer num `CMakeLists.txt`, mas o build real do ManaVerse é
+   via GNU Autotools (o próprio projeto marca o CMake como
+   "unsupported"). Reescrito com os passos validados de verdade
+   (incluindo a exigência de C++17, não C++11, para compilar com o ONNX
+   Runtime).
+3. **Faltavam os patches do lado do cliente** (`being.cpp.patch`,
+   `Makefile.am.patch`) no repositório -- existia só o
+   `beingactionpredictor.h/.cpp` solto. Gerados agora e validados com
+   `git apply --check`.
+
+## Problema encontrado e NÃO resolvido (decisão sua)
+
+Há uma pasta `old project/` na raiz do repositório original (~133MB),
+com binários de um projeto Unity completamente diferente (parece um jogo
+chamado "[K]night City", com arquivos BepInEx) -- não relacionado ao
+`tmwa`/ManaVerse. Não a movi para `app/` (não parece ser "o projeto
+atual") nem a apaguei (não é uma decisão que me cabe tomar sozinho).
+Ela **permanece intacta na raiz** deste repositório reorganizado, fora da
+estrutura `app/`/`TMWA/`/`manaverse-mirror/` pedida. Recomendo decidir
+entre: mover pra um repo separado, ou remover do histórico do git (ela
+infla bastante o tamanho do clone).
+
+Também notei, ao comparar `kisalto/tmwa` com o upstream, algumas mudanças
+sem relação com a telemetria (um divisor de tempo de ataque, remoção de
+duas chamadas a `pc_setstand`, remoção de uma checagem de limite
+`skill_num < MAX_SKILL`, e uma conta de bitmask de quest) -- não mexi em
+nenhuma delas, só registrei em `app/tmwa/README.md` pra você ter
+ciência, já que a checagem de limite removida em especial vale uma
+segunda olhada sua.
+
+## Licença
+
+Ver `app/README.md`.

@@ -1,0 +1,27 @@
+diff --git a/src/being/being.cpp b/src/being/being.cpp
+index ddde18c..c90a7a1 100644
+--- a/src/being/being.cpp
++++ b/src/being/being.cpp
+@@ -1867,6 +1867,22 @@ void Being::nextTile() restrict2
+ void Being::logic() restrict2
+ {
+     BLOCK_START("Being::logic")
++
++    // Fase 8: pista visual antecipada (telegraph) quando o modelo preve
++    // ataque iminente de uma being REMOTA. So cosmetico -- nao altera
++    // estado de jogo. TELEGRAPH_EFFECT_ID e um placeholder: precisa existir
++    // uma entrada com esse id no arquivo de efeitos do cliente (dados, nao
++    // codigo -- fica no pacote de dados do ManaVerse, nao neste repo).
++    // Enquanto esse id nao existir nos dados, EffectManager::trigger()
++    // simplesmente retorna false e nao faz nada (confirmado lendo
++    // effectmanager.cpp) -- e seguro deixar assim ate o efeito ser criado.
++    constexpr int TELEGRAPH_EFFECT_ID = 9001;
++    if (this != localPlayer && effectManager != nullptr &&
++        BeingActionPredictor::instance().checkAndConsumeTelegraph(this))
++    {
++        effectManager->trigger(TELEGRAPH_EFFECT_ID, this, 0);
++    }
++
+     if (A_UNLIKELY(mSpeechTime != 0))
+     {
+         mSpeechTime--;

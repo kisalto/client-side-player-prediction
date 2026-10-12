@@ -68,6 +68,15 @@ class BeingActionPredictor final
         // ainda (precisa de pelo menos 1 acao anterior registrada).
         float getAttackProbability(const Being *being);
 
+        // chamar em Being::logic(), 1x por being por frame -- encapsula o
+        // throttle de inferencia E a logica de "disparar so uma vez por
+        // borda de subida". Retorna true exatamente no frame em que a
+        // probabilidade cruza `threshold` (default 0.7) vindo de baixo --
+        // use o retorno pra disparar o efeito visual (ver FASE8_INTEGRACAO.md
+        // pra qual effectManager->trigger(...) usar). Nao dispara de novo
+        // ate a probabilidade cair abaixo do limiar e subir outra vez.
+        bool checkAndConsumeTelegraph(const Being *being, float threshold = 0.7F);
+
         // limpa o historico de uma being (chamar quando ela sai de
         // alcance/e destruida, pra nao vazar memoria indefinidamente).
         void forget(const Being *being);
@@ -86,6 +95,17 @@ class BeingActionPredictor final
             int lastDamage = 0;
             bool prevAttack = false;   // ultima acao foi ataque? (senao, foi move)
             bool hasHistory = false;   // ja teve pelo menos 1 acao registrada?
+
+            // throttle: nao roda inferencia ONNX toda chamada (ver
+            // getAttackProbability) -- cacheia por INFERENCE_THROTTLE_S
+            double lastInferenceTime = -1.0;
+            float cachedProb = 0.0F;
+
+            // latch do telegraph visual: fica true enquanto a prob estiver
+            // acima do limiar, pra so disparar UMA VEZ na borda de subida
+            // (ver checkAndConsumeTelegraph) -- sem isso, dispararia todo
+            // frame enquanto a previsao continuar "quente".
+            bool telegraphActive = false;
         };
 
         History &historyFor(const Being *being);

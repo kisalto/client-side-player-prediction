@@ -56,22 +56,28 @@ setup_manaverse() {
     log "== manaverse-mirror =="
     check_is_repo "$MANAVERSE_DIR" "manaverse-mirror" || return 1
 
+    # .h/.cpp sempre sobrescritos (fonte da verdade = app/manaverse/)
     mkdir -p "$MANAVERSE_DIR/src/ml"
     cp "$SCRIPT_DIR/manaverse/beingactionpredictor.h" "$SCRIPT_DIR/manaverse/beingactionpredictor.cpp" "$MANAVERSE_DIR/src/ml/"
     log "beingactionpredictor.h/.cpp copiados pra manaverse-mirror/src/ml/"
 
-    if grep -q "BeingActionPredictor" "$MANAVERSE_DIR/src/being/being.cpp" 2>/dev/null; then
-        log "being.cpp ja parece ter os hooks -- pulando git apply."
-    else
-        ( cd "$MANAVERSE_DIR" && git apply --check "$SCRIPT_DIR/manaverse/being.cpp.patch" && git apply "$SCRIPT_DIR/manaverse/being.cpp.patch" )
-        log "being.cpp.patch aplicado."
-    fi
+    # Cada patch tem um marcador proprio -- assim funciona tanto num ManaVerse
+    # "limpo" (aplica os 4, em ordem) quanto no seu manaverse-mirror, que ja
+    # tem os hooks da v1 commitados (so aplica o que falta).
+    apply_if_missing "$MANAVERSE_DIR" "src/being/being.cpp"          "onBeingMove"               "being.cpp.patch"          "hooks de movimento/dano/ataque"
+    apply_if_missing "$MANAVERSE_DIR" "src/Makefile.am"              "ml/beingactionpredictor"   "Makefile.am.patch"        "registro dos arquivos novos"
+    apply_if_missing "$MANAVERSE_DIR" "src/being/being.cpp"          "checkAndConsumeTelegraph"  "being-telegraph.patch"    "telegraph em Being::logic()"
+    apply_if_missing "$MANAVERSE_DIR" "src/progs/manaverse/client.cpp" "BeingActionPredictor"    "client.cpp.patch"         "init() do modelo no boot"
+}
 
-    if grep -q "ml/beingactionpredictor" "$MANAVERSE_DIR/src/Makefile.am" 2>/dev/null; then
-        log "Makefile.am ja parece registrar os arquivos novos -- pulando git apply."
+# apply_if_missing <repo> <arquivo-relativo> <marcador> <patch> <descricao>
+apply_if_missing() {
+    local repo="$1" file="$2" marker="$3" patch="$4" desc="$5"
+    if grep -q "$marker" "$repo/$file" 2>/dev/null; then
+        log "$desc: ja aplicado em $file -- pulando $patch."
     else
-        ( cd "$MANAVERSE_DIR" && git apply --check "$SCRIPT_DIR/manaverse/Makefile.am.patch" && git apply "$SCRIPT_DIR/manaverse/Makefile.am.patch" )
-        log "Makefile.am.patch aplicado."
+        ( cd "$repo" && git apply --check "$SCRIPT_DIR/manaverse/$patch" && git apply "$SCRIPT_DIR/manaverse/$patch" )
+        log "$desc: $patch aplicado."
     fi
 }
 

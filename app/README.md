@@ -29,7 +29,7 @@ app/
 ├── pipeline/                      # generate_synthetic_data.py, build_dataset.py,
 │                                   # train_model.py, train_sequence_model.py, export_onnx.py (Fases 3-7)
 ├── tmwa/                          # Fase 1: telemetry.hpp/.cpp + pc.cpp.patch (vai pro clone TMWA/)
-├── manaverse/                     # Fase 8: beingactionpredictor.h/.cpp + patches (vai pro clone manaverse-mirror/)
+├── manaverse/                     # Fase 8: beingactionpredictor.h/.cpp + 4 patches + tests/ (vai pro clone manaverse-mirror/)
 ├── experiments/
 │   ├── latency_injection/         # testes de latência/jitter/perda artificiais (Fase 9)
 │   └── bot_load/                  # testes com 50-100 bots simultâneos (Fase 10)
@@ -52,7 +52,7 @@ app/
 | 5 | Modelo baseline (Random Forest / XGBoost vs. aleatório) | ✅ feito, testado (RF 55,9% vs. 51,3% aleatório) | `pipeline/train_model.py` |
 | 6 | MLP, depois LSTM/GRU se ajudar | ✅ feito, testado (LSTM/GRU não superaram RF/MLP nos dados sintéticos -- achado válido) | `pipeline/train_model.py`, `pipeline/train_sequence_model.py` |
 | 7 | Export para `model.onnx` | ✅ feito, testado (labels/probs idênticos ao sklearn, diff ~1e-7) | `pipeline/export_onnx.py` |
-| 8 | Previsão client-side (ManaVerse + ONNX Runtime C++) | ✅ **compilado e linkado com sucesso** contra o build real do ManaVerse | `manaverse/` |
+| 8 | Previsão client-side (ManaVerse + ONNX Runtime C++) | ✅ compilado e linkado; 14 testes de runtime + contrato ONNX vs sklearn passando; boot do cliente real verificado (abre o `model.onnx`, sem crash). **Falta**: criar o efeito visual 9001 nos dados e testar jogando de verdade | `manaverse/` (guia: `manaverse/FASE8_INTEGRACAO.md`, testes: `manaverse/tests/`) |
 | 9 | Latência/jitter/perda artificiais | 🔲 a fazer | `experiments/latency_injection/` |
 | 10 | 50-100 bots simultâneos | 🔲 a fazer | `experiments/bot_load/` |
 | 11 | Multi-região (Foz → Edge SP → Costa Leste) | 🔲 a fazer | `experiments/` (pasta nova quando chegar lá) |

@@ -38,6 +38,10 @@ namespace
     constexpr double MAX_SPEED = 500.0;  // mesmo teto de seguranca do build_dataset.py (Fase 4)
     constexpr double MIN_DT_S = 0.05;    // mesmo piso de dt do build_dataset.py
     constexpr double NO_HISTORY_SENTINEL = -1.0;
+    // roda inferencia ONNX no maximo a cada INFERENCE_THROTTLE_S por being
+    // (200ms) -- o resto das chamadas devolve o valor cacheado. Evita
+    // rodar o modelo toda frame pra toda being visivel.
+    constexpr double INFERENCE_THROTTLE_S = 0.2;
 }  // namespace
 
 struct BeingActionPredictor::Impl
@@ -128,6 +132,10 @@ float BeingActionPredictor::getAttackProbability(const Being *being)
 
     History &h = it->second;
     const double t = nowSeconds();
+
+    if (h.lastInferenceTime > 0.0 && (t - h.lastInferenceTime) < INFERENCE_THROTTLE_S)
+        return h.cachedProb;
+
     const int x = being->getTileX();
     const int y = being->getTileY();
     const int hp = being->getHP();
@@ -181,10 +189,40 @@ float BeingActionPredictor::getAttackProbability(const Being *being)
             Ort::RunOptions{nullptr}, inputNames, &inputTensor, 1, outputNames, 1);
 
         const float *probs = outputTensors[0].GetTensorData<float>();
-        return probs[0];  // P(attack) -- classes_ = ['attack', 'move'], indice 0 = attack
+        h.cachedProb = probs[0];  // P(attack) -- classes_ = ['attack', 'move'], indice 0 = attack
+        h.lastInferenceTime = t;
+        return h.cachedProb;
     }
     catch (const Ort::Exception &)
     {
         return 0.0F;
     }
+}
+
+bool BeingActionPredictor::checkAndConsumeTelegraph(const Being *being, const float threshold)
+{
+    // "sem previsao disponivel" (modelo desligado / sem historico) NAO e o
+    // mesmo que "previsao = 0": getAttackProbability devolve 0 nos dois
+    // casos, entao sem essa guarda um limiar <= 0 dispararia mesmo sem
+    // modelo. (Bug achado pelo teste com modelo inexistente.)
+    if (!mReady || being == nullptr)
+        return false;
+
+    auto it = mHistory.find(static_cast<int>(being->getId()));
+    if (it == mHistory.end() || !it->second.hasHistory)
+        return false;
+    History &h = it->second;
+
+    const float p = getAttackProbability(being);
+
+    if (p >= threshold)
+    {
+        if (h.telegraphActive)
+            return false;  // ja disparou nesta "subida" -- espera cair abaixo do limiar antes de rearmar
+        h.telegraphActive = true;
+        return true;
+    }
+
+    h.telegraphActive = false;  // abaixo do limiar: rearma pro proximo cruzamento
+    return false;
 }

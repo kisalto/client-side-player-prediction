@@ -1,0 +1,28 @@
+diff --git a/src/progs/manaverse/client.cpp b/src/progs/manaverse/client.cpp
+index b939fa2..bc7dc3d 100644
+--- a/src/progs/manaverse/client.cpp
++++ b/src/progs/manaverse/client.cpp
+@@ -41,6 +41,8 @@
+ #include "being/playerinfo.h"
+ #include "being/playerrelations.h"
+ 
++#include "ml/beingactionpredictor.h"
++
+ #include "const/net/net.h"
+ 
+ #include "enums/being/attributesstrings.h"
+@@ -538,6 +540,14 @@ void Client::gameInit()
+ 
+     PlayerInfo::init();
+ 
++    // Fase 8: carrega o model.onnx (opcional -- se o arquivo nao existir,
++    // BeingActionPredictor fica desligado e getAttackProbability sempre
++    // retorna 0, sem erro nem crash). Espera-se que o arquivo seja
++    // colocado manualmente em localDataDir por enquanto; nenhum
++    // mecanismo de download/atualizacao automatica foi implementado.
++    BeingActionPredictor::instance().init(
++        pathJoin(settings.localDataDir, "model.onnx"));
++
+ #ifdef ANDROID
+ #ifndef USE_SDL2
+     WindowManager::updateScreenKeyboard(SDL_GetScreenKeyboardHeight(nullptr));
