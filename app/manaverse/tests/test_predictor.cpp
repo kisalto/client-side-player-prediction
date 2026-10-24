@@ -4,6 +4,7 @@
 #include "being/being.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <thread>
 static int fails = 0;
 #define CHECK(cond, msg) do { bool ok_=(cond); std::printf("[%s] %s\n", ok_?"OK":"FALHA", msg); if(!ok_) ++fails; } while(0)
@@ -18,9 +19,11 @@ int main() {
     CHECK(P.getAttackProbability(&ghost) == 0.0F, "init com modelo inexistente nao crasha e prob = 0");
     CHECK(P.checkAndConsumeTelegraph(&ghost, 0.0F) == false, "telegraph desligado sem modelo");
 
-    // 2) modelo real
+    // 2) modelo real (TCC_PREDICTOR_LOG vem do run_tests.sh -- o log so abre
+    // quando o modelo carrega, entao o init com modelo inexistente acima nao escreve nada)
     P.init("model.onnx");
     Being b; b.id = 7; b.x = 50; b.y = 60; b.hp = 35; b.maxHp = 100;
+    b.name = "Ama \"x\", y";  // aspas e virgula: o log tem que escapar
     CHECK(P.getAttackProbability(&b) == 0.0F, "sem historico -> prob 0");
 
     P.onBeingMove(&b); sleepMs(50);
@@ -46,6 +49,11 @@ int main() {
     CHECK(P.checkAndConsumeTelegraph(&c, 0.0F) == false, "idem, 3a chamada");
     CHECK(P.checkAndConsumeTelegraph(&c, 2.0F) == false, "cai abaixo do limiar -> rearma");
     CHECK(P.checkAndConsumeTelegraph(&c, 0.0F) == true,  "sobe de novo -> dispara outra vez");
+
+    // 3b) monstro/NPC nao entra (isEligible) -- nem historico, nem log
+    Being m; m.id = 9; m.type = ActorType::Monster;
+    P.onBeingAttack(&m); sleepMs(30);
+    CHECK(P.getAttackProbability(&m) == 0.0F, "monstro: sem historico -> prob 0");
 
     // 4) forget
     P.forget(&c);

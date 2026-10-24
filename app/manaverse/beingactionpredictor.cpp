@@ -5,10 +5,11 @@
 //
 // FORMATO DE ENTRADA DO model.onnx (confirmado inspecionando o arquivo
 // real gerado por export_onnx.py -- nao adivinhado):
-//   input:  1 tensor float32, shape [N, 13], nesta ordem exata:
-//     x, y, hp, max_hp, hp_ratio, velocity_x, velocity_y, speed,
-//     time_since_last_action, time_since_last_hurt, last_damage_taken,
-//     dead, prev_action_was_attack
+//   input:  1 tensor float32, shape [N, 9], nesta ordem exata:
+//     x, y, velocity_x, velocity_y, speed, time_since_last_action,
+//     time_since_last_hurt, last_damage_taken, prev_action_was_attack
+//     (hp/max_hp/hp_ratio/dead sairam: o cliente nao recebe o HP de
+//     jogadores remotos)
 //   output usado: "probabilities", shape [N, 2], float --
 //     coluna 0 = P(attack), coluna 1 = P(move) (ordem alfabetica das
 //     classes do sklearn -- classes_ = ['attack', 'move']). O output
@@ -26,6 +27,8 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include <onnxruntime_cxx_api.h>
@@ -34,7 +37,7 @@
 
 namespace
 {
-    constexpr int NUM_FEATURES = 13;
+    constexpr int NUM_FEATURES = 9;
     constexpr double MAX_SPEED = 500.0;  // mesmo teto de seguranca do build_dataset.py (Fase 4)
     constexpr double MIN_DT_S = 0.05;    // mesmo piso de dt do build_dataset.py
     constexpr double NO_HISTORY_SENTINEL = -1.0;
@@ -42,6 +45,27 @@ namespace
     // (200ms) -- o resto das chamadas devolve o valor cacheado. Evita
     // rodar o modelo toda frame pra toda being visivel.
     constexpr double INFERENCE_THROTTLE_S = 0.2;
+
+    // relogio de parede (epoch, s) so pro log de avaliacao -- as features
+    // continuam no steady_clock (nowSeconds), que nao pula com ajuste de hora
+    double wallSeconds()
+    {
+        using namespace std::chrono;
+        return duration<double>(system_clock::now().time_since_epoch()).count();
+    }
+
+    // TCC_PREDICTOR_THRESHOLD sobrescreve o limiar sem recompilar -- o valor
+    // calibrado sai de train_model.py (metrics.json -> attack_logo.limiar_cliente).
+    // <= 0 = nao definido.
+    float envThreshold()
+    {
+        static const float v = []
+        {
+            const char *s = std::getenv("TCC_PREDICTOR_THRESHOLD");
+            return s != nullptr ? std::strtof(s, nullptr) : -1.0F;
+        }();
+        return v;
+    }
 }  // namespace
 
 struct BeingActionPredictor::Impl
@@ -49,6 +73,13 @@ struct BeingActionPredictor::Impl
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "BeingActionPredictor"};
     std::unique_ptr<Ort::Session> session;
     Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    std::FILE *log = nullptr;  // TCC_PREDICTOR_LOG (ver logRow)
+
+    ~Impl()
+    {
+        if (log != nullptr)
+            std::fclose(log);
+    }
 };
 
 BeingActionPredictor &BeingActionPredictor::instance()
@@ -78,13 +109,103 @@ void BeingActionPredictor::init(const std::string &modelPath)
         options.SetIntraOpNumThreads(1);  // modelo pequeno, nao vale gastar mais threads nisso
         mImpl->session = std::make_unique<Ort::Session>(mImpl->env, modelPath.c_str(), options);
         mReady = true;
+        std::fprintf(stderr, "[predictor] modelo carregado: %s\n", modelPath.c_str());
+        if (envThreshold() > 0.0F)
+            std::fprintf(stderr, "[predictor] limiar do telegraph = %.3f (TCC_PREDICTOR_THRESHOLD)\n",
+                         static_cast<double>(envThreshold()));
+
+        const char *logPath = std::getenv("TCC_PREDICTOR_LOG");
+        if (logPath != nullptr && mImpl->log == nullptr)
+        {
+            // "a": varias execucoes do cliente vao pro mesmo arquivo; o
+            // cabecalho so entra se o arquivo estiver vazio
+            mImpl->log = std::fopen(logPath, "a");
+            if (mImpl->log == nullptr)
+            {
+                std::fprintf(stderr, "[predictor] nao consegui abrir TCC_PREDICTOR_LOG=%s -- sem log\n", logPath);
+            }
+            else
+            {
+                std::setvbuf(mImpl->log, nullptr, _IOLBF, 0);  // linha a linha: nada se perde se o cliente fechar
+                std::fseek(mImpl->log, 0, SEEK_END);  // posicao inicial em modo "a" depende da libc
+                if (std::ftell(mImpl->log) == 0)
+                {
+                    std::fputs("wall_time,event,being_id,name,p_attack,threshold,x,y,velocity_x,velocity_y,"
+                               "speed,time_since_last_action,time_since_last_hurt,last_damage_taken,"
+                               "prev_action_was_attack\n", mImpl->log);
+                }
+                std::fprintf(stderr, "[predictor] log de avaliacao: %s\n", logPath);
+                logRow("init", nullptr, -1.0F, envThreshold(), nullptr);
+            }
+        }
     }
     catch (const Ort::Exception &e)
     {
         // nunca deixa a falha de carregar o modelo derrubar o cliente --
         // so fica desligado (getAttackProbability sempre retorna 0).
         mReady = false;
+        std::fprintf(stderr, "[predictor] modelo NAO carregado (%s): %s -- predictor desligado\n",
+                     modelPath.c_str(), e.what());
     }
+}
+
+// So preve ACOES DE JOGADORES -- e o que o modelo foi treinado pra prever.
+// NPCs e monstros nao tem esse padrao de comportamento (achado no teste:
+// o telegraph disparava ao chegar perto de NPCs). TCC_PREDICTOR_ALL=1
+// libera todos os tipos de being, so pra depuracao.
+static bool isEligible(const Being *being)
+{
+    static const bool all = std::getenv("TCC_PREDICTOR_ALL") != nullptr;
+    return all || (being != nullptr && being->getType() == ActorType::Player);
+}
+
+void BeingActionPredictor::logRow(const char *event, const Being *being, const float p,
+                                  const float threshold, const float *features)
+{
+    if (mImpl->log == nullptr)
+        return;
+    std::FILE *f = mImpl->log;
+    std::fprintf(f, "%.3f,%s,", wallSeconds(), event);
+    if (being != nullptr)
+    {
+        // nome entre aspas (pode ter virgula/espaco); aspas internas dobradas, como no CSV padrao
+        std::fprintf(f, "%d,\"", static_cast<int>(being->getId()));
+        for (const char ch : being->getName())
+        {
+            if (ch == '"')
+                std::fputc('"', f);
+            std::fputc(ch, f);
+        }
+        std::fputs("\",", f);
+    }
+    else
+    {
+        std::fputs(",,", f);
+    }
+    if (p >= 0.0F)
+        std::fprintf(f, "%.5f", static_cast<double>(p));
+    std::fputc(',', f);
+    if (threshold > 0.0F)
+        std::fprintf(f, "%.4f", static_cast<double>(threshold));
+    for (int i = 0; i < NUM_FEATURES; ++i)
+    {
+        std::fputc(',', f);
+        if (features != nullptr && !std::isnan(features[i]))
+            std::fprintf(f, "%.6g", static_cast<double>(features[i]));
+    }
+    std::fputc('\n', f);
+}
+
+// linha "move"/"attack"/"hurt": so posicao (e o dano, no hurt) -- o resto das
+// features nao se aplica a um evento observado
+static std::array<float, NUM_FEATURES> observedRow(const Being *being, const float damage)
+{
+    std::array<float, NUM_FEATURES> r;
+    r.fill(NAN);
+    r[0] = static_cast<float>(being->getTileX());
+    r[1] = static_cast<float>(being->getTileY());
+    r[7] = damage;
+    return r;
 }
 
 BeingActionPredictor::History &BeingActionPredictor::historyFor(const Being *being)
@@ -99,25 +220,34 @@ void BeingActionPredictor::forget(const Being *being)
 
 void BeingActionPredictor::onBeingMove(const Being *being)
 {
+    if (!isEligible(being))
+        return;
     History &h = historyFor(being);
     h.lastActionTime = nowSeconds();
     h.prevAttack = false;
     h.hasHistory = true;
+    logRow("move", being, -1.0F, -1.0F, observedRow(being, NAN).data());
 }
 
 void BeingActionPredictor::onBeingAttack(const Being *being)
 {
+    if (!isEligible(being))
+        return;
     History &h = historyFor(being);
     h.lastActionTime = nowSeconds();
     h.prevAttack = true;
     h.hasHistory = true;
+    logRow("attack", being, -1.0F, -1.0F, observedRow(being, NAN).data());
 }
 
 void BeingActionPredictor::onBeingHurt(const Being *being, int damage)
 {
+    if (!isEligible(being))
+        return;
     History &h = historyFor(being);
     h.lastHurtTime = nowSeconds();
     h.lastDamage = damage;
+    logRow("hurt", being, -1.0F, -1.0F, observedRow(being, static_cast<float>(damage)).data());
 }
 
 float BeingActionPredictor::getAttackProbability(const Being *being)
@@ -154,21 +284,18 @@ float BeingActionPredictor::getAttackProbability(const Being *being)
     const double timeSinceLastAction = (h.lastActionTime > 0.0) ? (t - h.lastActionTime) : NO_HISTORY_SENTINEL;
     const double timeSinceLastHurt = (h.lastHurtTime > 0.0) ? (t - h.lastHurtTime) : NO_HISTORY_SENTINEL;
 
-    // ordem EXATA de export_onnx.py::ALL_FEATURES -- nao reordenar sem
-    // atualizar os dois lados.
+    // SO features que o CLIENTE consegue observar de um jogador remoto (sem
+    // hp/maxHp/dead: o servidor nao envia). Ordem EXATA de
+    // export_onnx.py::ALL_FEATURES -- nao reordenar sem atualizar os dois lados.
     std::array<float, NUM_FEATURES> features = {
         static_cast<float>(x),
         static_cast<float>(y),
-        static_cast<float>(hp),
-        static_cast<float>(maxHp),
-        maxHp > 0 ? static_cast<float>(hp) / static_cast<float>(maxHp) : 0.0F,
         static_cast<float>(velocityX),
         static_cast<float>(velocityY),
         static_cast<float>(speed),
         static_cast<float>(timeSinceLastAction),
         static_cast<float>(timeSinceLastHurt),
         static_cast<float>(h.lastDamage),
-        being->isAlive() ? 0.0F : 1.0F,
         h.prevAttack ? 1.0F : 0.0F,
     };
 
@@ -190,11 +317,26 @@ float BeingActionPredictor::getAttackProbability(const Being *being)
 
         const float *probs = outputTensors[0].GetTensorData<float>();
         h.cachedProb = probs[0];  // P(attack) -- classes_ = ['attack', 'move'], indice 0 = attack
+        static const bool debugOn = std::getenv("TCC_PREDICTOR_DEBUG") != nullptr;
+        if (debugOn)
+        {
+            std::fprintf(stderr,
+                "[predictor-debug] id=%d x=%d y=%d hp=%d maxhp=%d vel=(%.1f,%.1f) dt_acao=%.2f dt_dano=%.2f prevAtk=%d p_attack=%.3f\n",
+                id, x, y, hp, maxHp, velocityX, velocityY, timeSinceLastAction, timeSinceLastHurt,
+                h.prevAttack ? 1 : 0, static_cast<double>(h.cachedProb));
+        }
         h.lastInferenceTime = t;
+        logRow("infer", being, h.cachedProb, -1.0F, features.data());
         return h.cachedProb;
     }
-    catch (const Ort::Exception &)
+    catch (const Ort::Exception &e)
     {
+        static bool logged = false;
+        if (!logged)
+        {
+            logged = true;
+            std::fprintf(stderr, "[predictor] falha na inferencia (so o 1o erro e logado): %s\n", e.what());
+        }
         return 0.0F;
     }
 }
@@ -215,11 +357,16 @@ bool BeingActionPredictor::checkAndConsumeTelegraph(const Being *being, const fl
 
     const float p = getAttackProbability(being);
 
-    if (p >= threshold)
+    const float limit = envThreshold() > 0.0F ? envThreshold() : threshold;
+
+    if (p >= limit)
     {
         if (h.telegraphActive)
             return false;  // ja disparou nesta "subida" -- espera cair abaixo do limiar antes de rearmar
         h.telegraphActive = true;
+        std::fprintf(stderr, "[predictor] telegraph id=%d p=%.2f\n",
+                     static_cast<int>(being->getId()), static_cast<double>(p));
+        logRow("telegraph", being, p, limit, nullptr);
         return true;
     }
 

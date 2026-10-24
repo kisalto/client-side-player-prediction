@@ -22,8 +22,8 @@ $CXX "$HERE/test_contract.cpp" $LD -o test_contract && ./test_contract
 
 echo; echo "== B) BeingActionPredictor real =="
 $CXX -I"$HERE/stub" -I"$HERE/.." "$HERE/test_predictor.cpp" "$HERE/../beingactionpredictor.cpp" $LD -o test_predictor
-./test_predictor | tee out.txt
+TCC_PREDICTOR_LOG="$BUILD/log.csv" ./test_predictor | tee out.txt
 
-echo; echo "== B2) valores da classe C++ vs sklearn =="
-python3 "$HERE/check_values.py" out.txt
+echo; echo "== B2) valores da classe C++ vs sklearn + log de avaliacao (TCC_PREDICTOR_LOG) =="
+python3 "$HERE/check_values.py" out.txt log.csv
 echo; echo "TODOS OS TESTES PASSARAM"

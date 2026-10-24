@@ -162,3 +162,27 @@ do `init()`).
    throttlada a 1x/200ms por being, mas não medi com 50-100 beings).
 4. **Qualidade preditiva real**: depende de telemetria real (hoje o
    `model.onnx` do pipeline foi treinado só com dados sintéticos).
+
+## 8. Log de avaliação em jogo (`TCC_PREDICTOR_LOG`)
+
+Com `TCC_PREDICTOR_LOG=<arquivo.csv>`, o cliente grava 1 linha por
+inferência (`infer`: as 9 features + P(attack)), por telegraph (`telegraph`:
+P(attack) + limiar) e por ação/dano de jogador remoto que ele observou
+(`move`, `attack`, `hurt`). `wall_time` é epoch em segundos, o mesmo relógio
+do `bridge_recv_time`, e `name` é o nome do personagem. O arquivo é aberto
+em modo append (várias execuções no mesmo CSV, cabeçalho só uma vez) e é
+gravado linha a linha. Só abre se o modelo carregar.
+
+```bash
+TCC_PREDICTOR_THRESHOLD=0.143 TCC_PREDICTOR_LOG=~/tcc/ingame-logs/sessao.csv \
+  ~/tcc/manaverse-mirror/src/manaplus -d ~/tcc/tmwa-server-data/client-data \
+  -L ~/tcc/manaverse-local -s 26.175.144.227 -p 6901 -y tmwathena -U Amon
+python app/pipeline/evaluate_ingame.py --log ~/tcc/ingame-logs/sessao.csv \
+  --dsn "dbname=telemetry user=postgres password=postgres host=localhost port=5433" \
+  --athena ~/tcc/tmwa-server-data/world/save/athena.txt
+```
+
+Testado em `tests/` (`run_tests.sh`, parte B2): cabeçalho, eventos, nome
+com aspas e vírgula, e P(attack) do log igual ao sklearn sobre as features
+do próprio log. Os testes foram atualizados de 13 para 9 features em
+2026-10-24 (estavam desatualizados desde a remoção de hp/dead).
