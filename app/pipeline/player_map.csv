@@ -1,0 +1,16 @@
+# Pessoa (pseudonimo) dona de cada personagem das coletas oficiais.
+# Fonte: tmwa-server-data/world/save/athena.txt (char -> conta) + confirmacao do autor.
+# Nomes reais NAO entram aqui (TCLE); a correspondencia pseudonimo -> pessoa fica com o autor.
+# P05/P06 != P02: confirmado pelo autor em 2026-10-24 (mitra nao jogou a coleta 3).
+# Excluidos do dataset (--exclude-chars): 150003 (apagado, coleta 2), 150010 (banido, coleta 3).
+char_id,player_id
+150000,P01
+150001,P01
+150002,P01
+150007,P01
+150004,P02
+150006,P03
+150009,P03
+150008,P04
+150005,P05
+150011,P06

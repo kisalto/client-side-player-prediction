@@ -32,8 +32,14 @@ combate"), precisa voltar em telemetry.cpp e adicionar o nome do mapa
 de novo sem necessidade clara.
 
 Uso:
-    python build_dataset.py --dsn "dbname=telemetry user=postgres password=postgres host=localhost" \
-        --out dataset.csv [--session-id SESSION_ID]
+    python build_dataset.py --dsn "dbname=telemetry user=postgres password=postgres host=localhost port=5433" \
+        --out dataset.csv [--session-id SESSION_ID] [--split official] [--exclude-chars 150003] \
+        [--player-map player_map.csv]
+
+PESSOA != PERSONAGEM: a mesma pessoa joga com varios char_ids (trocou de
+personagem no meio da coleta, ou usou outro em outra coleta). --player-map
+(CSV char_id,player_id) adiciona a coluna player_id, que e o grupo certo pro
+leave-one-player-out do train_model.py; sem o mapa, player_id = char_id.
 """
 import argparse
 
@@ -51,17 +57,29 @@ MAX_SPEED = 500.0  # teto de seguranca (unidades de mapa/s) -- corta qualquer
                     # resíduo numérico que passe do piso de dt acima
 
 
-def load_events(dsn, session_id=None):
+def load_events(dsn, session_id=None, split=None, exclude_chars=()):
     query = """
-        SELECT session_id, char_id, event_type, x, y, hp, max_hp, dead,
-               extra, dest_x, dest_y, target_id, continuous, bridge_recv_time
-        FROM player_events
+        SELECT e.session_id, e.char_id, e.event_type, e.x, e.y, e.hp, e.max_hp, e.dead,
+               e.extra, e.dest_x, e.dest_y, e.target_id, e.continuous, e.bridge_recv_time
+        FROM player_events e
     """
-    params = ()
+    where, params = [], []
+    if split:
+        # rotulo por sessao (session_labels, ver schema.sql) -- separa a coleta
+        # oficial das sessoes de desenvolvimento no mesmo banco
+        query += " JOIN session_labels l ON l.session_id = e.session_id"
+        where.append("l.split = %s")
+        params.append(split)
     if session_id:
-        query += " WHERE session_id = %s"
-        params = (session_id,)
-    query += " ORDER BY char_id, bridge_recv_time"
+        where.append("e.session_id = %s")
+        params.append(session_id)
+    if exclude_chars:
+        # ex: personagem apagado/recriado no meio de uma coleta oficial
+        where.append("e.char_id <> ALL(%s)")
+        params.append(list(exclude_chars))
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY e.char_id, e.bridge_recv_time"
 
     with psycopg2.connect(dsn) as conn:
         df = pd.read_sql_query(query, conn, params=params)
@@ -69,7 +87,7 @@ def load_events(dsn, session_id=None):
 
 
 def build_rows_for_player(events):
-    """events: DataFrame de UM char_id, ja ordenado por bridge_recv_time.
+    """events: DataFrame de UM char_id numa UMA sessao, ja ordenado por bridge_recv_time.
     Retorna lista de dicts, uma por acao (move_cmd/attack) com historico
     suficiente pra calcular as features."""
     rows = []
@@ -132,31 +150,56 @@ def build_rows_for_player(events):
 
 def build_dataset(df):
     all_rows = []
-    for char_id, group in df.groupby('char_id', sort=False):
-        all_rows.extend(build_rows_for_player(group))
+    # por (sessao, char): o mesmo char_id pode aparecer em coletas de dias
+    # diferentes, e o historico (time_since_*, velocidade) nao pode atravessar
+    # de uma sessao pra outra
+    for _, group in df.groupby(['session_id', 'char_id'], sort=False):
+        all_rows.extend(build_rows_for_player(group.sort_values('bridge_recv_time', kind='stable')))
     return pd.DataFrame(all_rows)
+
+
+def add_player_id(dataset, map_path):
+    if not map_path:
+        dataset['player_id'] = dataset['char_id'].astype(str)
+        return dataset
+    mapping = pd.read_csv(map_path, comment='#', dtype={'player_id': str})
+    dataset = dataset.merge(mapping[['char_id', 'player_id']], on='char_id', how='left')
+    missing = sorted(dataset.loc[dataset['player_id'].isna(), 'char_id'].unique())
+    if missing:
+        print(f'AVISO: char_ids sem pessoa em {map_path} (cada um vira um jogador a parte): {missing}')
+        dataset['player_id'] = dataset['player_id'].fillna(dataset['char_id'].astype(str))
+    return dataset
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--dsn', default='dbname=telemetry user=postgres password=postgres host=localhost')
+    # port=5433: ver README.md, secao "Portas"
+    ap.add_argument('--dsn', default='dbname=telemetry user=postgres password=postgres host=localhost port=5433')
     ap.add_argument('--session-id', default=None, help='filtra por uma sessao especifica (default: todas)')
+    ap.add_argument('--split', choices=['official', 'dev'], default=None,
+                    help='usa so as sessoes com esse rotulo em session_labels (default: todas, sem filtro)')
+    ap.add_argument('--exclude-chars', type=int, nargs='+', default=[], metavar='CHAR_ID',
+                    help='char_ids a descartar (ex: 150003, personagem apagado na coleta oficial 2)')
+    ap.add_argument('--player-map', default=None, metavar='CSV',
+                    help='CSV char_id,player_id (pessoa dona de cada personagem; ver player_map.csv)')
     ap.add_argument('--out', default='dataset.csv')
     args = ap.parse_args()
 
-    raw = load_events(args.dsn, args.session_id)
+    raw = load_events(args.dsn, args.session_id, args.split, args.exclude_chars)
     if raw.empty:
         raise SystemExit('nenhum evento encontrado no Postgres (rode generate_synthetic_data.py primeiro?)')
 
     dataset = build_dataset(raw)
     if dataset.empty:
         raise SystemExit('nenhuma linha de acao com historico suficiente (precisa de pelo menos 2 eventos por jogador)')
+    dataset = add_player_id(dataset, args.player_map)
 
     dataset.to_csv(args.out, index=False)
 
-    n_players = dataset['char_id'].nunique()
+    n_players = dataset['player_id'].nunique()
     class_counts = dataset['action_type'].value_counts()
-    print(f'{len(raw)} eventos brutos -> {len(dataset)} linhas de acao, {n_players} jogadores.')
+    print(f'{len(raw)} eventos brutos -> {len(dataset)} linhas de acao, '
+          f'{dataset["char_id"].nunique()} personagens, {n_players} pessoas.')
     print(f'Distribuicao de action_type: {dict(class_counts)}')
     print(f'Salvo em: {args.out}')
 

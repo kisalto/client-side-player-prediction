@@ -25,7 +25,7 @@ player_death intercalados com os snapshots -- igual aconteceria de verdade.
 
 Uso:
     python generate_synthetic_data.py --players 20 --minutes 30 \
-        --dsn "dbname=telemetry user=postgres password=postgres host=localhost"
+        --dsn "dbname=telemetry user=postgres password=postgres host=localhost port=5433"
 """
 import argparse
 import math
@@ -156,7 +156,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--players', type=int, default=20, help='numero de jogadores simulados')
     ap.add_argument('--minutes', type=float, default=30, help='duracao simulada de cada jogador, em minutos')
-    ap.add_argument('--dsn', default='dbname=telemetry user=postgres password=postgres host=localhost')
+    # port=5433: ver README.md, secao "Portas"
+    ap.add_argument('--dsn', default='dbname=telemetry user=postgres password=postgres host=localhost port=5433')
     ap.add_argument('--seed', type=int, default=42)
     args = ap.parse_args()
 
