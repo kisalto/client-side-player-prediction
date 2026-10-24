@@ -18,8 +18,10 @@ desatualizados em relação ao `telemetry/proto/telemetry.proto`.
 ```bash
 pip install -r requirements.txt
 python -m grpc_tools.protoc -I../proto --python_out=. --grpc_python_out=. ../proto/telemetry.proto
-python telemetry_service.py --port 50051 --dsn "dbname=telemetry user=postgres password=postgres host=localhost"
+python telemetry_service.py --port 50051 --dsn "dbname=telemetry user=postgres password=postgres host=localhost port=5433"
 ```
+O Postgres do compose fica na **5433** do host, não na 5432 (ver
+`app/README.md`, seção "Portas", para o motivo).
 Os arquivos `telemetry_pb2.py`/`telemetry_pb2_grpc.py` gerados por esse
 comando são ignorados pelo git (ver `.gitignore` na raiz) -- regenere
 sempre que mudar o `.proto`.

@@ -7,7 +7,7 @@ desenho geral (tmwa-map --UDP--> bridge --gRPC--> aqui --> Postgres).
 
 Uso:
     python telemetry_service.py --port 50051 \
-        --dsn "dbname=telemetry user=postgres password=postgres host=localhost"
+        --dsn "dbname=telemetry user=postgres password=postgres host=localhost port=5433"
 
 Ou via variavel de ambiente TELEMETRY_DSN (mais pratico com Docker).
 """
@@ -145,7 +145,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--port', type=int, default=50051)
     ap.add_argument('--dsn', default=os.environ.get(
-        'TELEMETRY_DSN', 'dbname=telemetry user=postgres password=postgres host=localhost'))
+        'TELEMETRY_DSN', 'dbname=telemetry user=postgres password=postgres host=localhost port=5433'))
     ap.add_argument('--max-workers', type=int, default=8)
     args = ap.parse_args()
     serve(args.port, args.dsn, args.max_workers)
