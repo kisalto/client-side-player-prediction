@@ -81,6 +81,14 @@ class BeingActionPredictor final
         // alcance/e destruida, pra nao vazar memoria indefinidamente).
         void forget(const Being *being);
 
+        // LOG DE AVALIACAO EM JOGO: com TCC_PREDICTOR_LOG=<arquivo.csv>, init()
+        // abre esse CSV e grava 1 linha por inferencia ("infer", com as 9
+        // features e P(attack)), por telegraph disparado ("telegraph", com o
+        // limiar) e por acao/dano observado pelo cliente ("move", "attack",
+        // "hurt"). wall_time e epoch em segundos (mesmo relogio do
+        // bridge_recv_time da telemetria) e name e o nome do personagem, pra
+        // cruzar com player_events depois (app/pipeline/evaluate_ingame.py).
+
     private:
         BeingActionPredictor();
         ~BeingActionPredictor();
@@ -110,6 +118,10 @@ class BeingActionPredictor final
 
         History &historyFor(const Being *being);
         static double nowSeconds();
+        // features = as 9 do modelo (NaN = nao se aplica, sai vazio no CSV);
+        // threshold < 0 = sem limiar nessa linha
+        void logRow(const char *event, const Being *being, float p, float threshold,
+                    const float *features);
 
         struct Impl;                  // esconde Ort::Env/Ort::Session daqui
         std::unique_ptr<Impl> mImpl;

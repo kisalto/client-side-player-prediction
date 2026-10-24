@@ -1,4 +1,4 @@
-// Teste A: contrato do model.onnx (input "input" [N,13] float, output
+// Teste A: contrato do model.onnx (input "input" [N,9] float, output
 // "probabilities" [N,2], indice 0 = attack) vs. sklearn, linha a linha.
 #include <onnxruntime_cxx_api.h>
 #include <array>
@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+constexpr int NF = 9;  // == train_model.py::ALL_FEATURES
 int main() {
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "t");
     Ort::SessionOptions so;
@@ -22,9 +23,9 @@ int main() {
     while (std::getline(f, line)) {
         std::stringstream ss(line); std::string c; std::vector<double> v;
         while (std::getline(ss, c, ',')) v.push_back(std::stod(c));
-        std::array<float,13> feat; for (int i=0;i<13;++i) feat[i]=(float)v[i];
-        double expected = v[13];
-        std::array<int64_t,2> shape{1,13};
+        std::array<float,NF> feat; for (int i=0;i<NF;++i) feat[i]=(float)v[i];
+        double expected = v[NF];
+        std::array<int64_t,2> shape{1,NF};
         auto t = Ort::Value::CreateTensor<float>(mem, feat.data(), feat.size(), shape.data(), 2);
         const char* in[]={"input"}; const char* out[]={"probabilities"};
         auto r = s.Run(Ort::RunOptions{nullptr}, in, &t, 1, out, 1);
