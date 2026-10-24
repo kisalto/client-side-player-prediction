@@ -8,7 +8,7 @@ pronto pro cliente (Fase 8, ManaVerse + ONNX Runtime C++).
 
 v2: desde que prev_action_type virou prev_action_was_attack (0/1) no
 build_dataset.py, o pipeline inteiro e numerico -- um UNICO tensor float
-de entrada, shape [None, 13]. Isso evita StringTensorType no ONNX Runtime
+de entrada, shape [None, 9]. Isso evita StringTensorType no ONNX Runtime
 C++ (API bem mais chata e arriscada de acertar sem poder testar o cliente
 de verdade) -- decisao tomada pensando direto na Fase 8.
 
@@ -24,9 +24,13 @@ import pandas as pd
 from skl2onnx import convert_sklearn
 from skl2onnx.common.data_types import FloatTensorType
 
+# SO features que o CLIENTE consegue observar de um jogador REMOTO. hp, max_hp,
+# hp_ratio e dead ficaram de fora: o servidor nao manda o HP de outros
+# jogadores (medido: hp=0 maxhp=0 em 100% das leituras de um jogador remoto),
+# entao usa-las seria training-serving skew. Ordem == beingactionpredictor.cpp.
 ALL_FEATURES = [
-    'x', 'y', 'hp', 'max_hp', 'hp_ratio', 'velocity_x', 'velocity_y', 'speed',
-    'time_since_last_action', 'time_since_last_hurt', 'last_damage_taken', 'dead',
+    'x', 'y', 'velocity_x', 'velocity_y', 'speed',
+    'time_since_last_action', 'time_since_last_hurt', 'last_damage_taken',
     'prev_action_was_attack',
 ]
 
