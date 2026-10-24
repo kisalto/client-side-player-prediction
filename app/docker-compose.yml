@@ -13,8 +13,14 @@ services:
       POSTGRES_DB: telemetry
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    # Host 5433 (nao 5432): a maquina de dev tem um PostgreSQL nativo do
+    # Windows (servico postgresql-x64-18) ocupando a 5432, e com o WSL em
+    # networkingMode=mirrored as portas sao compartilhadas -- o Docker nao
+    # conseguia publicar a 5432 e localhost:5432 caia no Postgres errado.
+    # Dentro da rede do compose o Postgres continua na 5432 (ver
+    # TELEMETRY_DSN abaixo). Detalhes: README.md, secao "Portas".
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./telemetry/service/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro

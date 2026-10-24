@@ -64,9 +64,31 @@ cd app   # se ainda nao estiver aqui
 docker compose up --build
 ```
 
-Isso sobe Postgres (porta 5432) e o TelemetryService (porta 50051, gRPC).
-O schema é aplicado automaticamente na primeira subida
+Isso sobe Postgres (porta **5433** no host) e o TelemetryService (porta
+50051, gRPC). O schema é aplicado automaticamente na primeira subida
 (`telemetry/service/schema.sql` via `docker-entrypoint-initdb.d`).
+
+### Portas: por que o Postgres está na 5433 e não na 5432
+
+| Quem conecta | Endereço |
+|---|---|
+| Scripts no host/WSL (`pipeline/*.py`, `psql`, TelemetryService fora do Docker) | `localhost:5433` (`host=localhost port=5433` no DSN) |
+| TelemetryService dentro do compose | `postgres:5432` (rede interna do Docker, inalterada) |
+| Bridge → TelemetryService | `localhost:50051` (inalterado) |
+
+Motivo (19/10/2026): a máquina de desenvolvimento tem um PostgreSQL 18
+nativo do Windows (serviço `postgresql-x64-18`) escutando em
+`0.0.0.0:5432`. Depois que o WSL passou para `networkingMode=mirrored`
+(necessário para os amigos acessarem o servidor tmwa pelo IP do Radmin VPN
+durante a coleta), WSL e Windows passaram a compartilhar as mesmas portas.
+Resultado observado: o Docker subia o container sem publicar a 5432
+(`docker ps` mostrava só `5432/tcp`, sem `0.0.0.0:5432->`) e um
+`localhost:5432` no WSL cairia no Postgres do Windows, não no banco
+`telemetry` do TCC -- falha silenciosa e perigosa para o pipeline.
+
+Optou-se por mover a porta do TCC para 5433 em vez de parar o Postgres do
+Windows, para os dois poderem coexistir. Os dados não são afetados: ficam
+no volume `pgdata`, independente da porta publicada.
 
 ## Licença
 

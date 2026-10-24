@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS player_events (
     inserted_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Rotulo por sessao: separa a coleta oficial (usada no artigo) das sessoes
+-- de desenvolvimento. Uma sessao = um processo da bridge, entao reiniciar a
+-- bridge antes de cada coleta oficial. Preenchida a mao (nao pelo servico).
+CREATE TABLE IF NOT EXISTS session_labels (
+    session_id      TEXT PRIMARY KEY REFERENCES sessions(session_id),
+    split           TEXT NOT NULL CHECK (split IN ('dev', 'official')),
+    notes           TEXT,
+    labeled_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_player_events_session_time ON player_events (session_id, bridge_recv_time);
 CREATE INDEX IF NOT EXISTS idx_player_events_char ON player_events (char_id, bridge_recv_time);
 CREATE INDEX IF NOT EXISTS idx_player_events_type ON player_events (event_type);
