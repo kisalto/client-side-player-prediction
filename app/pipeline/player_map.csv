@@ -2,6 +2,8 @@
 # Fonte: tmwa-server-data/world/save/athena.txt (char -> conta) + confirmacao do autor.
 # Nomes reais NAO entram aqui (TCLE); a correspondencia pseudonimo -> pessoa fica com o autor.
 # P05/P06 != P02: confirmado pelo autor em 2026-10-24 (mitra nao jogou a coleta 3).
+# Coletas 4 (11/11) e 5 (15/11): 150013/150014 = mesma pessoa (P08); 150016 (ivydeadlock) = yuko (P06),
+# confirmado pelo autor em 2026-11-15.
 # Excluidos do dataset (--exclude-chars): 150003 (apagado, coleta 2), 150010 (banido, coleta 3).
 char_id,player_id
 150000,P01
@@ -14,3 +16,10 @@ char_id,player_id
 150008,P04
 150005,P05
 150011,P06
+150016,P06
+150012,P07
+150013,P08
+150014,P08
+150015,P09
+150017,P10
+150018,P11

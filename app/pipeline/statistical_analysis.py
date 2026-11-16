@@ -37,7 +37,7 @@ CUIDADO NA LEITURA: as acoes nao sao independentes (mesmo jogador, em
 sequencia), entao p-valores calculados por ACAO (secoes 3, 4 e 6) saem
 otimistas; o que vale ali e o TAMANHO DE EFEITO e a consistencia entre as
 pessoas. A inferencia sobre os modelos (secao 2) usa a PESSOA como unidade
-(n=6) ou reamostra blocos de tempo.
+(n = numero de pessoas) ou reamostra blocos de tempo.
 
 Uso:
     python statistical_analysis.py --dataset dataset.csv --results-dir resultados/ [--n-boot 10000] [--n-perm 10000]
@@ -45,6 +45,7 @@ Uso:
 import argparse
 import itertools
 import json
+import math
 import os
 import time
 import warnings
@@ -265,7 +266,7 @@ def time_blocks(df, seconds):
 def section_models(rep, df, y, persons, pidx, preds, target_recall, folds_info):
     rep.section('1. COMPARACAO DOS MODELOS (leave-one-player-out, ataque = classe positiva)')
     rep(f'{len(df)} acoes, {int(y.sum())} ataques (prevalencia {y.mean():.3f}), {len(persons)} pessoas. '
-        f'Limiar de decisao: recall-alvo {target_recall} nas predicoes OOF dos OUTROS 5 jogadores '
+        f'Limiar de decisao: recall-alvo {target_recall} nas predicoes OOF dos OUTROS {len(persons) - 1} jogadores '
         '(baseline: regra fixa, limiar 0.5).')
     base = df['prev_action_was_attack'].to_numpy(dtype=float)
     rows, thresholds = [], {}
@@ -326,8 +327,8 @@ def section_models(rep, df, y, persons, pidx, preds, target_recall, folds_info):
             'vence_rf': int((pl['pr_auc'] > person_level.loc[REF]['pr_auc']).sum()) if REF in models else np.nan,
         })
     summ = pd.DataFrame(summ).set_index('modelo')
-    rep('\nResumo (medias sobre as 6 pessoas; dp_pessoas = desvio entre pessoas; dp_sementes = desvio da media '
-        'entre sementes; agrupado = PR-AUC com todas as linhas juntas; vence_* = em quantas das 6 pessoas o '
+    rep(f'\nResumo (medias sobre as {len(persons)} pessoas; dp_pessoas = desvio entre pessoas; dp_sementes = desvio da media '
+        f'entre sementes; agrupado = PR-AUC com todas as linhas juntas; vence_* = em quantas das {len(persons)} pessoas o '
         'PR-AUC e maior):')
     rep.table(summ, 'resumo_modelos')
     rep('recall-alvo e o limiar sao escolhidos sem o jogador de teste; "prec_no_recall_base" fixa o recall no '
@@ -390,8 +391,8 @@ def section_uncertainty(rep, df, y, persons, pidx, preds, person_level, threshol
     M = person_level['pr_auc'].unstack('modelo')[models].loc[persons]  # pessoas x modelos
 
     # 2a. bootstrap por pessoa
-    rep(f'\n2a. Bootstrap por PESSOA ({args.n_boot} reamostras das 6 pessoas, com reposicao). Com 6 pessoas so '
-        'existem 462 reamostras distintas e o IC tende a ser estreito demais; o IC t (gl=5) vem ao lado como '
+    rep(f'\n2a. Bootstrap por PESSOA ({args.n_boot} reamostras das {P} pessoas, com reposicao). Com {P} pessoas so '
+        f'existem {math.comb(2 * P - 1, P)} reamostras distintas e o IC tende a ser estreito demais; o IC t (gl={P - 1}) vem ao lado como '
         'referencia mais conservadora.')
     boot_idx = rng.integers(0, P, size=(args.n_boot, P))
     tcrit = stats.t.ppf(0.975, P - 1)
@@ -484,8 +485,8 @@ def section_uncertainty(rep, df, y, persons, pidx, preds, person_level, threshol
     rep.fig(fig, 'modelos_pr_auc_ic95')
 
     # 2d. Wilcoxon pareado + Friedman (unidade = pessoa)
-    rep('\n2d. Wilcoxon pareado (signed-rank, exato, bilateral) sobre o PR-AUC das 6 pessoas (media das sementes). '
-        'Com n=6 o menor p-valor possivel e 2/64 = 0.031, que exige o mesmo sinal nas 6 pessoas. Tamanho de '
+    rep(f'\n2d. Wilcoxon pareado (signed-rank, exato, bilateral) sobre o PR-AUC das {P} pessoas (media das sementes). '
+        f'Com n={P} o menor p-valor possivel e 2/{2 ** P} = {2 / 2 ** P:.2g}, que exige o mesmo sinal nas {P} pessoas. Tamanho de '
         'efeito: correlacao rank-bisserial r (-1 a 1), diferenca media, mediana e estimador de Hodges-Lehmann. '
         'Holm corrige as comparacoes de cada familia.')
     for metric in ('pr_auc', 'precisao_no_recall_base'):
@@ -579,9 +580,9 @@ def section_uncertainty(rep, df, y, persons, pidx, preds, person_level, threshol
     rep.fig(fig, 'permutacao_nulo')
 
     # 2f. McNemar
-    rep('\n2f. McNemar (acertos/erros pareados nas MESMAS acoes, cada modelo no seu limiar de recall-alvo, '
+    rep(f'\n2f. McNemar (acertos/erros pareados nas MESMAS acoes, cada modelo no seu limiar de recall-alvo, '
         'semente base). b = so o 1o acerta; c = so o 2o acerta. As acoes nao sao independentes, entao o p-valor e '
-        'otimista; o IC95 da diferenca de acuracia vem do bootstrap por pessoa (6 pessoas). Separado em '
+        f'otimista; o IC95 da diferenca de acuracia vem do bootstrap por pessoa ({P} pessoas). Separado em '
         'acoes de ataque (recall) e de move (alarmes falsos).')
     rows = []
     for a, b in MCNEMAR_PAIRS:
@@ -630,9 +631,9 @@ def univariate_effects(x, yy):
 
 def section_association(rep, df, y, persons, pidx, results_dir, seed):
     rep.section('3. ASSOCIACAO DE CADA FEATURE COM O ATAQUE')
-    rep('p-valores por acao (n grande e acoes dependentes) saem minusculos e otimistas; olhar o tamanho de efeito '
-        '(AUC de 1 variavel = P(valor num ataque > valor num move); delta de Cliff = 2*AUC-1; d de Cohen) e se o '
-        'sinal se repete nas 6 pessoas.')
+    rep(f'p-valores por acao (n grande e acoes dependentes) saem minusculos e otimistas; olhar o tamanho de efeito '
+        f'(AUC de 1 variavel = P(valor num ataque > valor num move); delta de Cliff = 2*AUC-1; d de Cohen) e se o '
+        f'sinal se repete nas {len(persons)} pessoas.')
     X = df[ALL_FEATURES].astype(float)
     rows = []
     for person in ['TODAS'] + persons:
@@ -652,7 +653,7 @@ def section_association(rep, df, y, persons, pidx, results_dir, seed):
         include_groups=False)
     t = pooled[['media_ataque', 'media_move', 'mediana_ataque', 'mediana_move', 'r_ponto_bisserial',
                 'auc_1_variavel', 'delta_cliff', 'd_cohen', 'p_mann_whitney_holm']].join(consist)
-    rep('\n3a. Univariada (todas as pessoas juntas; ultimas colunas = variacao entre as 6 pessoas):')
+    rep(f'\n3a. Univariada (todas as pessoas juntas; ultimas colunas = variacao entre as {len(persons)} pessoas):')
     rep.table(t.sort_values('auc_1_variavel', key=lambda s: -abs(s - 0.5)), 'associacao_univariada', fmt='{:.4g}')
 
     # 3b. informacao mutua
@@ -676,7 +677,7 @@ def section_association(rep, df, y, persons, pidx, results_dir, seed):
     if os.path.exists(path):
         imp = pd.read_csv(path)
         rep('\n3c. Importancia por permutacao no jogador de teste de cada fold (queda de PR-AUC ao embaralhar a '
-            'feature; media +- dp entre as 6 pessoas). Grupos permutam features correlacionadas juntas.')
+            f'feature; media +- dp entre as {imp.jogador_teste.nunique()} pessoas). Grupos permutam features correlacionadas juntas.')
         g = imp.groupby(['modelo', 'feature'])['queda_pr_auc_media']
         t = (g.mean().map('{:.4f}'.format) + ' +- ' + g.std(ddof=1).map('{:.4f}'.format)).unstack('modelo')
         order = imp[imp.modelo == REF].groupby('feature')['queda_pr_auc_media'].mean().sort_values(ascending=False).index \
@@ -710,7 +711,7 @@ def section_association(rep, df, y, persons, pidx, results_dir, seed):
     rep.table(pd.DataFrame(rows).set_index('pessoa'), 'prev_ataque_2x2', fmt='{:.4g}')
     bd = st.test_equal_odds()
     rep(f'  Mantel-Haenszel: OR comum = {st.oddsratio_pooled:.2f} {fmt_ci(*st.oddsratio_pooled_confint())}, '
-        f'teste CMH p = {st.test_null_odds().pvalue:.2e}; Breslow-Day (OR igual nas 6 pessoas): '
+        f'teste CMH p = {st.test_null_odds().pvalue:.2e}; Breslow-Day (OR igual nas {len(persons)} pessoas): '
         f'chi2 = {bd.statistic:.2f}, p = {bd.pvalue:.2e}')
     rep.summary['prev_ataque_or_mh'] = float(st.oddsratio_pooled)
 
@@ -735,7 +736,7 @@ def section_classic(rep, df, y, persons, pidx, person_level, args):
     # 4a. regressao logistica
     rep('\n4a. Regressao logistica (todas as acoes). Continuas com log1p nas caudas e padronizadas: OR = razao de '
         'chances por +1 desvio-padrao; binarias: OR de 0 -> 1. EP classico e EP robusto agrupado por pessoa '
-        '(so 6 grupos: o robusto e aproximado).')
+        f'(so {len(persons)} grupos: o robusto e aproximado).')
     Xc = sm.add_constant(Z)
     fit = sm.Logit(y, Xc).fit(disp=0, maxiter=200)
     fit_cl = sm.Logit(y, Xc).fit(disp=0, maxiter=200, cov_type='cluster', cov_kwds={'groups': groups})
@@ -847,7 +848,7 @@ def section_survival(rep, df, y, persons, pidx):
     rep.fig(fig, 'km_intervalo_entre_ataques')
     rep.table(pd.DataFrame(out).set_index('pessoa'), 'sobrevivencia_intervalos', fmt='{:.4g}')
     lr = multivariate_logrank_test(gaps['dur'], gaps['pessoa'], gaps['evento'])
-    rep(f'  log-rank entre as 6 pessoas: chi2 = {lr.test_statistic:.1f}, p = {lr.p_value:.2e}')
+    rep(f'  log-rank entre as {len(persons)} pessoas: chi2 = {lr.test_statistic:.1f}, p = {lr.p_value:.2e}')
 
     # risco especifico de ataque em funcao do tempo desde a ultima acao (riscos competitivos: move censura)
     rep('\n  Risco ESPECIFICO de ataque x tempo desde a ultima acao (time_since_last_action; a proxima acao ser um '
@@ -982,7 +983,7 @@ def section_calibration(rep, df, y, persons, pidx, preds, thresholds, re_tab, ar
     rep('5a. Calibracao (semente base, cada pessoa avaliada com o modelo que nao a viu). Brier skill = 1 - '
         'Brier/Brier(prevalencia dos outros jogadores); ECE = erro de calibracao esperado (10 faixas iguais e 15 '
         'faixas de mesma contagem); inclinacao ideal = 1 (< 1: probabilidades extremas demais), calibracao-na-media '
-        'ideal = 0 (> 0: subestima o risco). "platt"/"isotonica" = recalibrado com as predicoes OOF dos OUTROS 5 '
+        f'ideal = 0 (> 0: subestima o risco). "platt"/"isotonica" = recalibrado com as predicoes OOF dos OUTROS {len(persons) - 1} '
         'jogadores (sem olhar a pessoa de teste). RF usa class_weight=balanced e LSTM/GRU usam pos_weight, entao '
         'as probabilidades cruas DELES sao infladas de proposito.')
     recal = {}
@@ -1092,7 +1093,7 @@ def section_calibration(rep, df, y, persons, pidx, preds, thresholds, re_tab, ar
         re_tab['limiar_rf_oraculo'] = pd.Series(oracle)
         rho = stats.spearmanr(re_tab['intercepto_aleatorio'], re_tab['limiar_rf_oraculo'])
         rep(f'\n5c. Limiar da RF que daria exatamente recall {args.target_recall} em cada pessoa (oraculo, '
-            'descritivo) x intercepto aleatorio da pessoa no modelo misto (secao 4c). Spearman (n=6, so '
+            f'descritivo) x intercepto aleatorio da pessoa no modelo misto (secao 4c). Spearman (n={len(re_tab)}, so '
             f'descritivo): rho = {rho.statistic:.2f}, p = {rho.pvalue:.3f}')
         rep.table(re_tab, 'limiar_oraculo_x_intercepto', fmt='{:.4f}')
 
@@ -1329,18 +1330,21 @@ def section_learning(rep, results_dir):
         # media sobre os subconjuntos de pessoas dentro de cada jogador de teste, depois media/dp entre jogadores
         per = npes.groupby(['modelo', 'n_pessoas', 'jogador_teste'])['pr_auc'].mean()
         t = per.groupby(['modelo', 'n_pessoas']).agg(['mean', 'std']).unstack('modelo')
-        rep('PR-AUC no jogador de teste x NUMERO DE PESSOAS no treino (media de todas as combinacoes possiveis de '
-            'pessoas; media e dp entre os 6 jogadores de teste):')
+        rep('PR-AUC no jogador de teste x NUMERO DE PESSOAS no treino (media das combinacoes de pessoas avaliadas '
+            f'em cada tamanho; media e dp entre os {per.index.get_level_values("jogador_teste").nunique()} jogadores de teste):')
         rep.table(t, 'curva_aprendizado_n_pessoas', fmt='{:.4f}')
         for m in per.index.get_level_values('modelo').unique():
             pm = per.loc[m].unstack('n_pessoas')
-            gain = (pm[pm.columns.max()] - pm[pm.columns.max() - 1])
+            # os dois maiores tamanhos avaliados (com --lc-sizes nem todo n_pessoas existe)
+            n_prev, n_max = sorted(pm.columns)[-2:]
+            gain = pm[n_max] - pm[n_prev]
             rho = stats.spearmanr(np.tile(pm.columns, len(pm)), pm.to_numpy().ravel())
-            rep(f'  {m}: ganho medio de {pm.columns.max() - 1} -> {pm.columns.max()} pessoas = {gain.mean():+.4f} '
+            rep(f'  {m}: ganho medio de {n_prev} -> {n_max} pessoas = {gain.mean():+.4f} '
                 f'(melhora em {int((gain > 0).sum())}/{len(gain)} jogadores de teste); Spearman(n_pessoas, PR-AUC) = '
                 f'{rho.statistic:.2f}')
         frac = lc[lc.curva == 'fracao_do_tempo'].groupby(['modelo', 'fracao'])['pr_auc'].agg(['mean', 'std']).unstack('modelo')
-        rep('\nPR-AUC x FRACAO do tempo de jogo de cada pessoa de treino (as 5 outras pessoas; inicio de cada sessao):')
+        rep(f'\nPR-AUC x FRACAO do tempo de jogo de cada pessoa de treino (as {lc.jogador_teste.nunique() - 1} outras pessoas; '
+            'inicio de cada sessao):')
         rep.table(frac, 'curva_aprendizado_fracao', fmt='{:.4f}')
         fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
         for m in per.index.get_level_values('modelo').unique():
@@ -1364,7 +1368,7 @@ def section_learning(rep, results_dir):
             r = r[(r.modelo.isin(['lstm', 'gru'])) & (r.semente == r.semente.min())]
             ks = pd.concat([ks, r])
         t = ks.groupby(['modelo', 'seq_len'])['pr_auc_teste'].agg(['mean', 'std']).unstack('modelo')
-        rep('\nTamanho da janela K de LSTM/GRU (1 semente; PR-AUC medio e dp entre as 6 pessoas):')
+        rep(f'\nTamanho da janela K de LSTM/GRU (1 semente; PR-AUC medio e dp entre as {ks.jogador_teste.nunique()} pessoas):')
         rep.table(t, 'janela_k', fmt='{:.4f}')
 
 

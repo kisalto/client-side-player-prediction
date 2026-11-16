@@ -89,6 +89,7 @@ def main():
 
     df = pd.read_csv(args.dataset)
     is_att = df['action_type'] == 'attack'
+    n_pessoas = df['player_id'].nunique()
     meta = {
         'gerado_em': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
         'dataset': {
@@ -101,10 +102,10 @@ def main():
             ).reset_index().to_dict(orient='records'),
         },
         'protocolo': {
-            'validacao': 'leave-one-player-out por pessoa (6 folds); ataque = classe positiva',
+            'validacao': f'leave-one-player-out por pessoa ({n_pessoas} folds); ataque = classe positiva',
             'metrica_principal': 'PR-AUC (average precision) de ataque, media entre pessoas',
-            'limiar': 'recall-alvo 0.7 nas predicoes OOF dos outros 5 jogadores (baseline: regra fixa)',
-            'unidade_de_inferencia': 'pessoa (n=6); bootstrap hierarquico pessoa -> blocos de 60 s',
+            'limiar': f'recall-alvo 0.7 nas predicoes OOF dos outros {n_pessoas - 1} jogadores (baseline: regra fixa)',
+            'unidade_de_inferencia': f'pessoa (n={n_pessoas}); bootstrap hierarquico pessoa -> blocos de 60 s',
         },
     }
     for name, key in (('folds_tabular.json', 'folds_tabular'), ('sequence_config.json', 'config_sequencia')):

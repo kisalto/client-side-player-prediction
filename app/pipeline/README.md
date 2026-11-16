@@ -6,9 +6,13 @@
 |---|---|---|
 | `generate_synthetic_data.py` | 3 ✅ | Gera N jogadores simulados (random walk com meta + encontros de dano/morte + ações de movimento/ataque) e grava direto no Postgres |
 | `build_dataset.py` | 4 ✅ | Lê `player_events`, monta 1 linha por ação real com `X` = estado+histórico, `Y` = tipo de ação + parâmetros; `--player-map` liga personagem → pessoa |
-| `player_map.csv` | 4 | char_id → pessoa (pseudônimo P01…P06), grupo do leave-one-player-out |
+| `player_map.csv` | 4 | char_id → pessoa (pseudônimo P01…P11), grupo do leave-one-player-out |
 | `train_model.py` | 5-6 ✅ | Random Forest + MLP + XGBoost vs. baseline aleatório/classe majoritária (classificação) + Random Forest Regressor vs. Dead Reckoning (direção); salva `model.pkl` |
-| `train_sequence_model.py` | 6 ✅ | LSTM/GRU sobre a sequência bruta das últimas K ações, pra testar se sequência crua supera as features resumidas à mão |
+| `train_sequence_model.py` | 6 ✅ | LSTM/GRU sobre a sequência bruta das últimas K ações, pra testar se sequência crua supera as features resumidas à mão; `--device cuda` e `--n-folds` |
+| `compare_models.py` | 9 | 14 modelos no mesmo LOPO (baseline, Markov, lineares, RF, XGBoost, MLP) + curva de aprendizado; `--n-folds` (grupos de pessoas) e `--lc-*` |
+| `statistical_analysis.py` | 9 | Bootstrap por pessoa/hierárquico, Wilcoxon + Holm, Friedman, calibração, limiar, curva de aprendizado → `estatistica/report.txt` |
+| `export_results_json.py` | 9 | Junta tudo de `--results-dir` em `resultados_estatisticos.json` |
+| `mixed_model_mcmc.py` | 9 | Logística mista bayesiana (PyMC); pesado (horas) |
 | `evaluate_ingame.py` | 8 | Lê o CSV do `TCC_PREDICTOR_LOG` do ManaVerse: recall por episódio de ataque, precisão do telegraph, antecedência, PR-AUC por inferência (+ cruzamento com a telemetria do servidor) |
 | `export_onnx.py` | 7 ✅ | Converte `model.pkl` → `model.onnx`, valida saída idêntica ao sklearn (diferença ~1e-7, só arredondamento) |
 
@@ -34,6 +38,89 @@ tensor por coluna, nomeado igual à coluna -- ver `_to_onnx_inputs()` em
 cliente de jogo. Se a latência de inferência incomodar na Fase 8/9, vale
 reduzir `n_estimators` ou trocar por um modelo mais leve (o MLP, por
 exemplo, tende a gerar um ONNX bem menor).
+
+## Resultados (dados reais, coletas oficiais 1–5, 11 pessoas, rodada de 2026-11-15)
+
+Sessões em `session_labels`: oficiais 5f8b0218 (19/10), 0eb49873 (20/10),
+74ce842c (24/10), 5f5c171f (11/11) e a40d72d9 (15/11); 09d65843 (12/10) é
+`dev` (teste anterior à coleta oficial 1). Comandos (venv `~/tcc/venv-ml`,
+torch `2.14.0+cu130`, GPU RTX 3050):
+
+```bash
+python build_dataset.py --split official --exclude-chars 150003 150006 150010 150013 \
+    --player-map player_map.csv --out dataset_v2.csv
+python compare_models.py --dataset dataset_v2.csv --out-dir resultados_v2 --n-folds 0 --seeds 3 \
+    --learning-curve --lc-test-persons 0 --lc-max-subsets 3 --lc-sizes 1 2 3 5 7 10
+python train_sequence_model.py --dataset dataset_v2.csv --out-dir resultados_v2 --n-folds 0 --seeds 3 \
+    --device cuda --batch-size 2048
+python statistical_analysis.py --dataset dataset_v2.csv --results-dir resultados_v2
+python export_results_json.py --dataset dataset_v2.csv --results-dir resultados_v2
+```
+
+Exclusões: 150003 (apagado) e 150010 (banido), como antes, mais todo
+personagem com menos de 300 eventos nas sessões oficiais (150006: 31
+eventos; 150013: 139), todos com 0 ataques. **O 150006 entrava na rodada de
+6 pessoas** (como P03, que agora é só o 150009).
+
+Dataset: 147.739 eventos → **71.817 ações (6.775 ataques, prevalência
+9,4%)**, 13 personagens de **11 pessoas**. Validação: LOPO (uma pessoa por
+rodada, 11 rodadas), 3 sementes. Tempo: tabular 21 min + curva 15 min (CPU);
+LSTM/GRU 10,5 min (GPU).
+
+| Pessoa | Ações | Ataques | Prevalência |
+|---|---|---|---|
+| P01 | 24.365 | 2.160 | 0,089 |
+| P02 | 4.301 | 453 | 0,105 |
+| P03 | 10.153 | 264 | 0,026 |
+| P04 | 5.853 | 405 | 0,069 |
+| P05 | 10.911 | 1.073 | 0,098 |
+| P06 | 4.555 | 369 | 0,081 |
+| P07 | 1.010 | 242 | 0,240 |
+| P08 | 5.108 | 384 | 0,075 |
+| P09 | 1.251 | 347 | 0,277 |
+| P10 | 1.590 | 336 | 0,211 |
+| P11 | 2.720 | 742 | 0,273 |
+
+**PR-AUC de ataque, média entre pessoas (dp entre pessoas)**, ao lado da
+rodada de 6 pessoas (`~/tcc/work/stats`, 5 sementes, LSTM/GRU em CPU com
+batch 512):
+
+| Modelo | 6 pessoas | 11 pessoas |
+|---|---|---|
+| Baseline "repete a ação anterior" | 0,524 | 0,564 (0,143) |
+| Markov ordem 5 | 0,658 | 0,677 (0,119) |
+| Logística (log) | 0,649 | 0,690 (0,137) |
+| LDA | 0,648 | 0,694 (0,138) |
+| MLP | 0,718 | 0,651 (0,144) |
+| Rede sem histórico | 0,675 | 0,726 (0,124) |
+| Random Forest | 0,747 | **0,787 (0,127)** |
+| XGBoost | 0,743 | **0,799 (0,129)** |
+| LSTM | 0,764 | 0,777 (0,117) |
+| GRU | 0,765 | 0,767 (0,124) |
+
+- **RF − baseline:** +0,223, IC95 hierárquico [0,190; 0,253]; RF vence nas
+  11/11 pessoas; Wilcoxon exato p = 0,00098, **Holm p = 0,013** (com 6
+  pessoas: p = 0,031, Holm 0,406; com n=6 o menor p possível já era 0,031).
+- **Friedman** (14 modelos × 11 pessoas): χ² = 125,1, p = 2,0e-20, W de
+  Kendall = 0,875. Posto médio: XGBoost 1,55, LSTM 2,45, RF 2,82, GRU 3,27.
+- **XGBoost − RF:** +0,012 [0,003; 0,021], 10/11 pessoas, Holm p = 0,029
+  (efeito pequeno). **LSTM − RF:** −0,010 [−0,035; 0,011]; **GRU − RF:**
+  −0,020 [−0,050; −0,001]. Com 6 pessoas o GRU ficava +0,018 [−0,008; 0,047].
+- **Limiar RF (recall-alvo 0,7 nos outros 10):** 0,187 a 0,463 entre
+  pessoas (antes 0,087 a 0,557); recall atingido de 0,462 (P01) a 0,911
+  (P10), dp 0,120 (antes 0,165). O limiar continua não transferindo para P01.
+- **Curva de aprendizado (RF):** 1 pessoa 0,647 → 2: 0,724 → 5: 0,773 →
+  7: 0,780 → 10: 0,788. De 7 para 10 pessoas: +0,008 (melhora em 8/11);
+  XGBoost +0,010 (10/11). Ainda sobe, mas pouco.
+- **P01–P06 quase não mudaram** (RF por pessoa, diferença ≤ 0,012). A média
+  subiu porque entraram P07, P09, P10 e P11, que têm prevalência de
+  0,21 a 0,28, e o PR-AUC acompanha a prevalência. **Hipótese, não testada.**
+
+Mudanças de código nesta rodada: patch `pipeline_grupos_gpu` (`--n-folds`,
+`--lc-*`, `--device`); `statistical_analysis.py` e `export_results_json.py`
+sem textos fixos de "6 pessoas"; seção 7 do `statistical_analysis.py` não
+quebra mais quando `--lc-sizes` não é consecutivo (compara os dois maiores
+tamanhos avaliados).
 
 ## Resultados (dados reais, coletas oficiais 1–3, rodada de 2026-10-24)
 
