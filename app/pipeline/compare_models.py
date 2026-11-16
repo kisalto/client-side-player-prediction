@@ -28,8 +28,18 @@ OUTROS jogadores (mesma regra pra todos os modelos). Pra RF tambem sai o
 limiar "estrito" do train_model.py (LOPO interno so nos jogadores de treino),
 como checagem de sensibilidade.
 
+VALIDACAO POR GRUPOS DE PESSOAS (--n-folds N, opcional)
+Com muitas pessoas, uma rodada por pessoa (LOPO) fica cara. Com --n-folds N as
+pessoas sao divididas em N grupos (GroupKFold): cada pessoa continua so no
+teste ou so no treino de cada rodada, e a P(ataque) OOF de cada linha continua
+sendo de um modelo que nunca viu aquela pessoa. Sem --n-folds (ou com
+--n-folds 0) o protocolo e o LOPO original, uma pessoa por rodada.
+
 Uso:
     python compare_models.py --dataset dataset.csv --out-dir resultados/ [--seeds 5] [--learning-curve]
+    # com muitas pessoas:
+    python compare_models.py --dataset dataset.csv --out-dir resultados/ --n-folds 10 --seeds 3 \
+        --learning-curve --lc-test-persons 10 --lc-max-subsets 3 --lc-sizes 1 2 5 10 20
 """
 import argparse
 import itertools
@@ -43,7 +53,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.model_selection import GroupKFold, LeaveOneGroupOut
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
@@ -65,6 +75,23 @@ FEATURE_GROUPS = {
     'grupo_velocidade(vx,vy,speed)': ['velocity_x', 'velocity_y', 'speed'],
     'grupo_dano(tslh,last_damage)': ['time_since_last_hurt', 'last_damage_taken'],
 }
+
+
+def person_splits(groups, n_folds):
+    """Divisoes treino/teste por PESSOA. n_folds <= 0 (ou >= numero de pessoas)
+    = LOPO, uma pessoa por rodada (protocolo original); senao GroupKFold com
+    n_folds grupos de pessoas. Devolve uma lista de (train_idx, test_idx)."""
+    groups = pd.Series(groups).reset_index(drop=True)
+    n_persons = groups.nunique()
+    dummy = np.zeros(len(groups))
+    if n_folds <= 0 or n_folds >= n_persons:
+        return list(LeaveOneGroupOut().split(dummy, groups=groups))
+    return list(GroupKFold(n_splits=n_folds).split(dummy, groups=groups))
+
+
+def fold_label(persons):
+    persons = sorted(persons)
+    return persons[0] if len(persons) == 1 else f'{len(persons)} pessoas ({persons[0]}..{persons[-1]})'
 
 
 def log_features(X):
@@ -153,7 +180,7 @@ def permutation_importance_ap(model, X, y, n_repeats, rng):
     return rows
 
 
-def run_lopo(df, seeds, perm_repeats, inner_threshold, target_recall, log):
+def run_lopo(df, seeds, perm_repeats, inner_threshold, target_recall, log, n_folds=0):
     X, groups = df[ALL_FEATURES], df['player_id']
     y = (df['action_type'] == 'attack').to_numpy(dtype=int)
     n = len(df)
@@ -168,10 +195,11 @@ def run_lopo(df, seeds, perm_repeats, inner_threshold, target_recall, log):
 
     folds, importances = [], []
     rng = np.random.default_rng(seeds[0])
-    for train_idx, test_idx in LeaveOneGroupOut().split(X, y, groups):
-        person = groups.iloc[test_idx[0]]
-        fold = {'jogador_teste': person, 'n_teste': int(len(test_idx)), 'ataques_teste': int(y[test_idx].sum()),
-                'tempo_s': {}}
+    for train_idx, test_idx in person_splits(groups, n_folds):
+        test_persons = sorted(groups.iloc[test_idx].unique())
+        person = fold_label(test_persons)
+        fold = {'jogadores_teste': test_persons, 'n_teste': int(len(test_idx)),
+                'ataques_teste': int(y[test_idx].sum()), 'tempo_s': {}}
         for k in MARKOV_ORDERS:
             preds[f'markov_ordem{k}@0'][test_idx] = markov_fit_predict(codes[k], y, train_idx, test_idx, k)
 
@@ -191,20 +219,29 @@ def run_lopo(df, seeds, perm_repeats, inner_threshold, target_recall, log):
             # limiar "estrito" do train_model.py: LOPO interno so nos jogadores de treino
             sub = df.iloc[train_idx]
             inner = np.zeros(len(sub))
-            for tr, te in LeaveOneGroupOut().split(sub, groups=sub['player_id']):
+            for tr, te in person_splits(sub['player_id'], n_folds):
                 rf = make_model('random_forest', seeds[0]).fit(sub[ALL_FEATURES].iloc[tr], y[train_idx][tr])
                 inner[te] = rf.predict_proba(sub[ALL_FEATURES].iloc[te])[:, 1]
             fold['limiar_rf_lopo_interno'] = pick_threshold(y[train_idx], inner, target_recall)
             log(f'  {person} limiar RF (LOPO interno): {fold["limiar_rf_lopo_interno"]:.3f}')
-        folds.append(fold)
+        # uma entrada por pessoa de teste (statistical_analysis.py le 'jogador_teste'); no LOPO e uma so
+        for tp in test_persons:
+            mask = (groups.iloc[test_idx] == tp).to_numpy()
+            folds.append({**fold, 'jogador_teste': tp, 'n_teste': int(mask.sum()),
+                          'ataques_teste': int(y[test_idx][mask].sum())})
 
     return pd.DataFrame(preds), folds, pd.DataFrame(importances)
 
 
-def run_learning_curve(df, seed, log):
+def run_learning_curve(df, seed, log, test_persons=0, max_subsets=0, sizes=None):
     X = df[ALL_FEATURES]
     y = (df['action_type'] == 'attack').to_numpy(dtype=int)
     persons = sorted(df['player_id'].unique())
+    rng = np.random.default_rng(seed)
+    test_list = persons
+    if test_persons and test_persons < len(persons):
+        # sorteio fixo pela semente: quais pessoas servem de teste na curva
+        test_list = sorted(rng.choice(persons, size=test_persons, replace=False).tolist())
     # posicao relativa (0-1] de cada linha no tempo de jogo do seu bloco
     block = df.groupby(BLOCK, sort=False)
     frac_pos = (block.cumcount() + 1) / block['t'].transform('size')
@@ -216,11 +253,26 @@ def run_learning_curve(df, seed, log):
             ap = average_precision_score(y[te_mask], model.predict_proba(X[te_mask])[:, 1])
             rows.append({'modelo': m, 'n_treino': int(tr_mask.sum()), 'pr_auc': float(ap), **extra})
 
-    for test in persons:
+    for test in test_list:
         te = (df['player_id'] == test).to_numpy()
         others = [p for p in persons if p != test]
-        for k in range(1, len(others) + 1):
-            for subset in itertools.combinations(others, k):
+        ks = [k for k in (sizes or range(1, len(others) + 1)) if 1 <= k <= len(others)]
+        if sizes and len(others) not in ks:
+            ks.append(len(others))  # o ponto "todas as outras pessoas" sempre entra
+        for k in ks:
+            if max_subsets:
+                # sorteia ate max_subsets combinacoes de k pessoas (todas as combinacoes explodem com muita gente)
+                seen, subsets = set(), []
+                for _ in range(max_subsets * 20):
+                    sub = tuple(sorted(rng.choice(others, size=k, replace=False).tolist()))
+                    if sub not in seen:
+                        seen.add(sub)
+                        subsets.append(sub)
+                    if len(subsets) >= max_subsets:
+                        break
+            else:
+                subsets = itertools.combinations(others, k)
+            for subset in subsets:
                 tr = df['player_id'].isin(subset).to_numpy()
                 fit_eval(tr, te, {'jogador_teste': test, 'curva': 'n_pessoas', 'n_pessoas': k, 'fracao': 1.0,
                                   'pessoas_treino': '+'.join(subset)})
@@ -242,7 +294,15 @@ def main():
     ap.add_argument('--perm-repeats', type=int, default=10, help='repeticoes da importancia por permutacao (0 = pula)')
     ap.add_argument('--no-inner-threshold', action='store_true', help='pula o limiar estrito (LOPO interno) da RF')
     ap.add_argument('--target-recall', type=float, default=0.7)
+    ap.add_argument('--n-folds', type=int, default=0,
+                    help='grupos de pessoas na validacao (GroupKFold); 0 = LOPO, uma pessoa por rodada (padrao)')
     ap.add_argument('--learning-curve', action='store_true')
+    ap.add_argument('--lc-test-persons', type=int, default=0,
+                    help='curva: quantas pessoas sorteadas servem de teste (0 = todas)')
+    ap.add_argument('--lc-max-subsets', type=int, default=0,
+                    help='curva: maximo de combinacoes sorteadas por tamanho de treino (0 = todas)')
+    ap.add_argument('--lc-sizes', type=int, nargs='*', default=None,
+                    help='curva: numeros de pessoas no treino a testar (padrao: todos de 1 ate n-1)')
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -257,22 +317,24 @@ def main():
     check_block_order(df)
     seeds = [args.base_seed + i for i in range(args.seeds)]
     log(f'dataset: {len(df)} linhas, {df.player_id.nunique()} pessoas, {int((df.action_type == "attack").sum())} '
-        f'ataques | sementes {seeds}')
+        f'ataques | sementes {seeds} | validacao: '
+        f'{"LOPO (uma pessoa por rodada)" if args.n_folds <= 0 else f"{args.n_folds} grupos de pessoas"}')
 
     t0 = time.time()
     preds, folds, importances = run_lopo(df, seeds, args.perm_repeats, not args.no_inner_threshold,
-                                         args.target_recall, log)
+                                         args.target_recall, log, n_folds=args.n_folds)
     preds.insert(0, 'row', np.arange(len(df)))
     preds.to_csv(os.path.join(args.out_dir, 'oof_tabular.csv.gz'), index=False)
     if len(importances):
         importances.to_csv(os.path.join(args.out_dir, 'perm_importance.csv'), index=False)
     with open(os.path.join(args.out_dir, 'folds_tabular.json'), 'w') as f:
-        json.dump({'sementes': seeds, 'folds': folds}, f, indent=2)
+        json.dump({'sementes': seeds, 'n_folds': args.n_folds, 'folds': folds}, f, indent=2)
     log(f'LOPO tabular ok em {time.time() - t0:.0f}s -> {args.out_dir}/oof_tabular.csv.gz')
 
     if args.learning_curve:
         t0 = time.time()
-        lc = run_learning_curve(df, seeds[0], log)
+        lc = run_learning_curve(df, seeds[0], log, test_persons=args.lc_test_persons,
+                                max_subsets=args.lc_max_subsets, sizes=args.lc_sizes)
         lc.to_csv(os.path.join(args.out_dir, 'learning_curve.csv'), index=False)
         log(f'curva de aprendizado ok em {time.time() - t0:.0f}s')
 

@@ -33,9 +33,23 @@ na escolha da epoca.
 dead, que o cliente nao observa, juntava sessoes diferentes do mesmo char_id e
 avaliava com um unico sorteio e com acuracia.)
 
+GPU (--device)
+Por padrao usa a GPU (CUDA) se o PyTorch enxergar uma, senao CPU. Na GPU os
+tensores do fold ficam na placa e so a P(ataque) volta pra CPU. Resultados na
+GPU podem variar um pouco entre rodadas (kernels nao deterministicos do cuDNN
+nas RNNs); a semente fixa continua valendo pra ordem dos mini-batches e pros
+pesos iniciais.
+
+VALIDACAO POR GRUPOS DE PESSOAS (--n-folds N): igual ao compare_models.py.
+0 (padrao) = uma pessoa por rodada (LOPO). Em sequence_runs.csv continua uma
+linha por pessoa de teste (PR-AUC calculado so nas linhas daquela pessoa).
+
 Uso:
     python train_sequence_model.py --dataset dataset.csv --out-dir resultados/ [--seq-len 16] [--seeds 5] \
         [--k-sweep 4 8 16 32]
+    # com muitas pessoas, na GPU:
+    python train_sequence_model.py --dataset dataset.csv --out-dir resultados/ --n-folds 10 --seeds 3 \
+        --device cuda --batch-size 2048
 """
 import argparse
 import json
@@ -47,10 +61,9 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import average_precision_score
-from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import StandardScaler
 
-from compare_models import BLOCK, check_block_order, log_features
+from compare_models import BLOCK, check_block_order, fold_label, log_features, person_splits
 from train_model import ALL_FEATURES, load_dataset
 
 CELLS = ['rede_sem_historico', 'lstm', 'gru']
@@ -94,26 +107,28 @@ def predict(model, hist, cur, idx, batch_size=4096):
     out = []
     with torch.no_grad():
         for b in range(0, len(idx), batch_size):
-            i = torch.from_numpy(idx[b:b + batch_size])
-            out.append(torch.sigmoid(model(hist[i], cur[i])).numpy())
+            i = torch.from_numpy(idx[b:b + batch_size]).to(hist.device)
+            out.append(torch.sigmoid(model(hist[i], cur[i])).float().cpu().numpy())
     return np.concatenate(out)
 
 
 def fit_predict(cell, hist, cur, y, tr_idx, va_idx, te_idx, seed, args):
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    model = AttackNet(cur.shape[1], cell, hidden=args.hidden)
+    dev = hist.device
+    model = AttackNet(cur.shape[1], cell, hidden=args.hidden).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     n_pos = y[tr_idx].sum()
-    loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor((len(tr_idx) - n_pos) / max(n_pos, 1), dtype=torch.float32))
-    y_t = torch.from_numpy(y.astype(np.float32))
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor((len(tr_idx) - n_pos) / max(n_pos, 1),
+                                                       dtype=torch.float32, device=dev))
+    y_t = torch.from_numpy(y.astype(np.float32)).to(dev)
 
     best_ap, best_state, best_epoch, bad = -1.0, None, 0, 0
     for epoch in range(1, args.max_epochs + 1):
         model.train()
         perm = rng.permutation(tr_idx)
         for b in range(0, len(perm), args.batch_size):
-            i = torch.from_numpy(perm[b:b + args.batch_size])
+            i = torch.from_numpy(perm[b:b + args.batch_size]).to(dev)
             opt.zero_grad()
             loss = loss_fn(model(hist[i], cur[i]), y_t[i])
             loss.backward()
@@ -121,7 +136,7 @@ def fit_predict(cell, hist, cur, y, tr_idx, va_idx, te_idx, seed, args):
         ap = average_precision_score(y[va_idx], predict(model, hist, cur, va_idx))
         if ap > best_ap + 1e-4:
             best_ap, best_epoch, bad = ap, epoch, 0
-            best_state = {k: v.clone() for k, v in model.state_dict().items()}
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         else:
             bad += 1
             if bad >= args.patience:
@@ -140,25 +155,36 @@ def run(df, cells, seeds, seq_len, args, log):
 
     preds = {f'{c}@{s}': np.full(len(df), np.nan) for c in cells for s in seeds}
     runs = []
-    for train_idx, test_idx in LeaveOneGroupOut().split(df, groups=df['player_id']):
-        person = df['player_id'].iloc[test_idx[0]]
+    dev = torch.device(args.device)
+    groups = df['player_id'].to_numpy()
+    for train_idx, test_idx in person_splits(df['player_id'], args.n_folds):
+        test_persons = sorted(pd.unique(groups[test_idx]))
+        label = fold_label(test_persons)
         tr_idx = train_idx[~is_val_tail[train_idx]]
         va_idx = train_idx[is_val_tail[train_idx]]
         scaler = StandardScaler().fit(feats.iloc[train_idx])
         F = scaler.transform(feats).astype(np.float32)
-        hist = torch.from_numpy(build_history(F, y.astype(np.float32), pos, seq_len))
-        cur = torch.from_numpy(F)
+        hist = torch.from_numpy(build_history(F, y.astype(np.float32), pos, seq_len)).to(dev)
+        cur = torch.from_numpy(F).to(dev)
         for c in cells:
             for s in seeds:
                 t0 = time.time()
                 p, epoch, val_ap = fit_predict(c, hist, cur, y, tr_idx, va_idx, test_idx, s, args)
                 preds[f'{c}@{s}'][test_idx] = p
-                ap = average_precision_score(y[test_idx], p)
-                runs.append({'jogador_teste': person, 'modelo': c, 'semente': s, 'seq_len': seq_len,
-                             'melhor_epoca': epoch, 'pr_auc_validacao': float(val_ap), 'pr_auc_teste': float(ap),
-                             'tempo_s': round(time.time() - t0, 1)})
-                log(f'  K={seq_len} {person} {c}@{s}: PR-AUC teste {ap:.3f} (val {val_ap:.3f}, '
-                    f'epoca {epoch}, {time.time() - t0:.0f}s)')
+                dt = round(time.time() - t0, 1)
+                # uma linha por pessoa de teste (no LOPO e uma so); tempo_s e o do treino do fold inteiro
+                for tp in test_persons:
+                    m = groups[test_idx] == tp
+                    ap = average_precision_score(y[test_idx][m], p[m]) if y[test_idx][m].any() else float('nan')
+                    runs.append({'jogador_teste': tp, 'fold': label, 'modelo': c, 'semente': s, 'seq_len': seq_len,
+                                 'melhor_epoca': epoch, 'pr_auc_validacao': float(val_ap),
+                                 'pr_auc_teste': float(ap), 'tempo_s': dt})
+                ap_fold = average_precision_score(y[test_idx], p)
+                log(f'  K={seq_len} {label} {c}@{s}: PR-AUC teste {ap_fold:.3f} (val {val_ap:.3f}, '
+                    f'epoca {epoch}, {dt:.0f}s)')
+        del hist, cur
+        if dev.type == 'cuda':
+            torch.cuda.empty_cache()
     return pd.DataFrame(preds), pd.DataFrame(runs)
 
 
@@ -177,8 +203,16 @@ def main():
     ap.add_argument('--k-sweep', type=int, nargs='*', default=[],
                     help='tamanhos de janela extras pra LSTM/GRU (1 semente cada); ex: 4 8 32')
     ap.add_argument('--threads', type=int, default=os.cpu_count())
+    ap.add_argument('--device', default='auto',
+                    help="auto (GPU se houver, senao CPU), cuda, cuda:0 ou cpu")
+    ap.add_argument('--n-folds', type=int, default=0,
+                    help='grupos de pessoas na validacao (GroupKFold); 0 = LOPO, uma pessoa por rodada (padrao)')
     args = ap.parse_args()
 
+    if args.device == 'auto':
+        args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    elif args.device.startswith('cuda') and not torch.cuda.is_available():
+        raise SystemExit('--device cuda pedido, mas o PyTorch nao encontrou GPU (torch.cuda.is_available() = False)')
     torch.set_num_threads(args.threads)
     os.makedirs(args.out_dir, exist_ok=True)
     log_file = open(os.path.join(args.out_dir, 'train_sequence_model.log'), 'a')
@@ -191,14 +225,17 @@ def main():
     df = load_dataset(args.dataset)
     check_block_order(df)
     seeds = [args.base_seed + i for i in range(args.seeds)]
-    log(f'dataset: {len(df)} linhas, {df.player_id.nunique()} pessoas | K={args.seq_len} | sementes {seeds}')
+    gpu = f' ({torch.cuda.get_device_name(torch.device(args.device))})' if args.device.startswith('cuda') else ''
+    log(f'dataset: {len(df)} linhas, {df.player_id.nunique()} pessoas | K={args.seq_len} | sementes {seeds} | '
+        f'dispositivo {args.device}{gpu} | validacao: '
+        f'{"LOPO (uma pessoa por rodada)" if args.n_folds <= 0 else f"{args.n_folds} grupos de pessoas"}')
 
     t0 = time.time()
     preds, runs = run(df, CELLS, seeds, args.seq_len, args, log)
     preds.insert(0, 'row', np.arange(len(df)))
     preds.to_csv(os.path.join(args.out_dir, 'oof_sequencia.csv.gz'), index=False)
     runs.to_csv(os.path.join(args.out_dir, 'sequence_runs.csv'), index=False)
-    log(f'LOPO sequencia ok em {time.time() - t0:.0f}s')
+    log(f'validacao por pessoa (sequencia) ok em {time.time() - t0:.0f}s')
 
     if args.k_sweep:
         sweep = []
