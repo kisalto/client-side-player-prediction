@@ -1,0 +1,527 @@
+{
+  "uid": "tcc-coleta",
+  "title": "TCC - Coleta ao vivo",
+  "timezone": "browser",
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "session",
+        "label": "Sessão",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "tcc-postgres"
+        },
+        "refresh": 1,
+        "sort": 0,
+        "includeAll": false,
+        "multi": false,
+        "query": "SELECT s.session_id AS __value, COALESCE(l.split, 'sem rótulo') || ' · ' || to_char(s.created_at, 'DD/MM HH24:MI') AS __text FROM sessions s LEFT JOIN session_labels l ON l.session_id = s.session_id ORDER BY s.created_at DESC",
+        "definition": "sessões, mais recente primeiro"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Eventos na sessão",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT count(*) AS eventos FROM player_events WHERE session_id = '$session'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Ações (movimento + ataque)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT count(*) FILTER (WHERE event_type IN ('player_move_cmd','player_attack')) AS acoes FROM player_events WHERE session_id = '$session'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Ataques",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT count(*) FILTER (WHERE event_type = 'player_attack') AS ataques FROM player_events WHERE session_id = '$session'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "% de ataques",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT 100.0 * count(*) FILTER (WHERE event_type = 'player_attack') / NULLIF(count(*) FILTER (WHERE event_type IN ('player_move_cmd','player_attack')), 0) AS pct FROM player_events WHERE session_id = '$session'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "description": "Nas coletas anteriores ficou entre 2,6% e 10,5% por pessoa (7,7% no total)."
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Jogadores ativos (últimos 2 min)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT count(DISTINCT char_id) AS ativos FROM player_events WHERE session_id = '$session' AND bridge_recv_time > extract(epoch FROM now()) - 120"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Segundos desde o último evento",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT extract(epoch FROM now()) - max(bridge_recv_time) AS s FROM player_events WHERE session_id = '$session'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 30
+              },
+              {
+                "color": "red",
+                "value": 120
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value"
+      },
+      "description": "Se ficar vermelho com gente jogando, a telemetria parou: confira a ponte e o serviço."
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Eventos por minuto, por tipo",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', to_timestamp(bridge_recv_time)) AS time, event_type AS metric, count(*) AS value FROM player_events WHERE session_id = '$session' AND $__unixEpochFilter(bridge_recv_time) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Por personagem nesta sessão",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT char_id AS personagem, count(*) FILTER (WHERE event_type = 'player_move_cmd') AS movimentos, count(*) FILTER (WHERE event_type = 'player_attack') AS ataques, round(100.0 * count(*) FILTER (WHERE event_type = 'player_attack') / NULLIF(count(*) FILTER (WHERE event_type IN ('player_move_cmd','player_attack')), 0), 1) AS \"% ataques\", round((extract(epoch FROM now()) - max(bridge_recv_time))::numeric) AS \"s desde o último evento\" FROM player_events WHERE session_id = '$session' GROUP BY char_id ORDER BY ataques DESC"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Ataques acumulados por personagem (sessões oficiais)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT e.char_id AS personagem, count(DISTINCT e.session_id) AS sessoes, count(*) FILTER (WHERE e.event_type = 'player_attack') AS ataques, count(*) FILTER (WHERE e.event_type IN ('player_move_cmd','player_attack')) AS acoes FROM player_events e JOIN session_labels l ON l.session_id = e.session_id WHERE l.split = 'official' GROUP BY e.char_id ORDER BY ataques DESC"
+        }
+      ],
+      "description": "Nas coletas anteriores, cada pessoa tinha entre 264 e 1.678 ataques."
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Todas as sessões",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "tcc-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "tcc-postgres"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT s.session_id AS sessao, s.created_at AS criada_em, COALESCE(l.split, 'sem rótulo') AS rotulo, count(e.id) AS eventos, count(e.id) FILTER (WHERE e.event_type = 'player_attack') AS ataques, count(DISTINCT e.char_id) AS personagens FROM sessions s LEFT JOIN session_labels l ON l.session_id = s.session_id LEFT JOIN player_events e ON e.session_id = s.session_id GROUP BY s.session_id, s.created_at, l.split ORDER BY s.created_at DESC"
+        }
+      ],
+      "description": "Sessões 'sem rótulo' ainda não foram marcadas em session_labels. Marque como 'official' só depois do TCLE de todos."
+    }
+  ]
+}

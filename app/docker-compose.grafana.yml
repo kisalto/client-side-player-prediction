@@ -1,0 +1,23 @@
+# Grafana para acompanhar a coleta ao vivo. Uso (a partir de app/):
+#   docker compose -f docker-compose.yml -f docker-compose.grafana.yml up -d
+# Depois abra http://localhost:3000 (painel "TCC - Coleta ao vivo").
+services:
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/coleta.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  grafana-data:

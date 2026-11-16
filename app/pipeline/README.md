@@ -57,6 +57,13 @@ python statistical_analysis.py --dataset dataset_v2.csv --results-dir resultados
 python export_results_json.py --dataset dataset_v2.csv --results-dir resultados_v2
 ```
 
+**Resultados oficiais: `resultados_v2_b512/`.** `resultados_v2/` tem LSTM/GRU
+treinados com batch 2048, que piora esses modelos (ver testes abaixo).
+`resultados_v2_b512/` = arquivos tabulares de `resultados_v2/` + LSTM/GRU do
+teste T1 (`--batch-size 512`, o mesmo da rodada de 6 pessoas), com
+`statistical_analysis.py` e `export_results_json.py` rodados de novo nessa
+pasta. Os números abaixo são de `resultados_v2_b512/`.
+
 Exclusões: 150003 (apagado) e 150010 (banido), como antes, mais todo
 personagem com menos de 300 eventos nas sessões oficiais (150006: 31
 eventos; 150013: 139), todos com 0 ataques. **O 150006 entrava na rodada de
@@ -65,7 +72,7 @@ eventos; 150013: 139), todos com 0 ataques. **O 150006 entrava na rodada de
 Dataset: 147.739 eventos → **71.817 ações (6.775 ataques, prevalência
 9,4%)**, 13 personagens de **11 pessoas**. Validação: LOPO (uma pessoa por
 rodada, 11 rodadas), 3 sementes. Tempo: tabular 21 min + curva 15 min (CPU);
-LSTM/GRU 10,5 min (GPU).
+LSTM/GRU 10,5 min (GPU, batch 2048) ou 22 min (GPU, batch 512).
 
 | Pessoa | Ações | Ataques | Prevalência |
 |---|---|---|---|
@@ -83,7 +90,7 @@ LSTM/GRU 10,5 min (GPU).
 
 **PR-AUC de ataque, média entre pessoas (dp entre pessoas)**, ao lado da
 rodada de 6 pessoas (`~/tcc/work/stats`, 5 sementes, LSTM/GRU em CPU com
-batch 512):
+batch 512); LSTM/GRU de 11 pessoas em GPU com batch 512:
 
 | Modelo | 6 pessoas | 11 pessoas |
 |---|---|---|
@@ -92,20 +99,23 @@ batch 512):
 | Logística (log) | 0,649 | 0,690 (0,137) |
 | LDA | 0,648 | 0,694 (0,138) |
 | MLP | 0,718 | 0,651 (0,144) |
-| Rede sem histórico | 0,675 | 0,726 (0,124) |
+| Rede sem histórico | 0,675 | 0,754 (0,119) |
 | Random Forest | 0,747 | **0,787 (0,127)** |
 | XGBoost | 0,743 | **0,799 (0,129)** |
-| LSTM | 0,764 | 0,777 (0,117) |
-| GRU | 0,765 | 0,767 (0,124) |
+| LSTM | 0,764 | **0,796 (0,100)** |
+| GRU | 0,765 | **0,789 (0,124)** |
 
 - **RF − baseline:** +0,223, IC95 hierárquico [0,190; 0,253]; RF vence nas
   11/11 pessoas; Wilcoxon exato p = 0,00098, **Holm p = 0,013** (com 6
   pessoas: p = 0,031, Holm 0,406; com n=6 o menor p possível já era 0,031).
-- **Friedman** (14 modelos × 11 pessoas): χ² = 125,1, p = 2,0e-20, W de
-  Kendall = 0,875. Posto médio: XGBoost 1,55, LSTM 2,45, RF 2,82, GRU 3,27.
-- **XGBoost − RF:** +0,012 [0,003; 0,021], 10/11 pessoas, Holm p = 0,029
-  (efeito pequeno). **LSTM − RF:** −0,010 [−0,035; 0,011]; **GRU − RF:**
-  −0,020 [−0,050; −0,001]. Com 6 pessoas o GRU ficava +0,018 [−0,008; 0,047].
+- **Friedman** (14 modelos × 11 pessoas): χ² = 124,2, p = 3,0e-20, W de
+  Kendall = 0,869. Posto médio: XGBoost 2,09, LSTM 2,55, GRU 2,64, RF 3,27.
+- **Contra a RF:** XGBoost +0,012 [0,003; 0,021], 10/11 pessoas, Holm
+  p = 0,039 (efeito pequeno); LSTM +0,009 [−0,018; 0,039], 6/11, Holm p = 1;
+  GRU +0,002 [−0,028; 0,023], 6/11, Holm p = 1. **XGBoost, LSTM, GRU e RF
+  ficam praticamente empatados.** Com 6 pessoas o GRU ficava +0,018
+  [−0,008; 0,047]. LSTM e GRU também vencem o baseline em 11/11 (Holm
+  p = 0,013); no recall do baseline, precisão LSTM 0,813, GRU 0,805, RF 0,787.
 - **Limiar RF (recall-alvo 0,7 nos outros 10):** 0,187 a 0,463 entre
   pessoas (antes 0,087 a 0,557); recall atingido de 0,462 (P01) a 0,911
   (P10), dp 0,120 (antes 0,165). O limiar continua não transferindo para P01.
@@ -113,8 +123,109 @@ batch 512):
   7: 0,780 → 10: 0,788. De 7 para 10 pessoas: +0,008 (melhora em 8/11);
   XGBoost +0,010 (10/11). Ainda sobe, mas pouco.
 - **P01–P06 quase não mudaram** (RF por pessoa, diferença ≤ 0,012). A média
-  subiu porque entraram P07, P09, P10 e P11, que têm prevalência de
-  0,21 a 0,28, e o PR-AUC acompanha a prevalência. **Hipótese, não testada.**
+  subiu com a entrada de P07–P11; parte disso é a prevalência maior de P07,
+  P09, P10 e P11 (0,21 a 0,28) e parte é o P01 pesar menos (teste T4 abaixo).
+
+**Testes de diagnóstico** (`resultados_v2_testes/`, script `rodar_testes.sh`;
+PR-AUC médio entre pessoas, sementes 42–44):
+
+| Teste | O que isola | Resultado |
+|---|---|---|
+| T1: dataset_v2, GPU, batch 512 (vs. 2048) | tamanho do batch | rede sem histórico 0,726 → 0,754; LSTM 0,777 → **0,796**; GRU 0,767 → **0,789**. LSTM − RF +0,009 (vence 6/11), GRU − RF +0,002 (6/11) |
+| T2: dataset de 6 pessoas, GPU batch 512 vs. CPU batch 512 (rodada antiga) | CPU × GPU | LSTM 0,762 → 0,768; GRU 0,765 → 0,757; rede sem histórico 0,678 → 0,677 (maior diferença numa pessoa: 0,034, GRU) |
+| T3: dataset_v2 só com P01–P06 (tabular + LSTM/GRU GPU batch 512) | dados novos das mesmas 6 pessoas | baseline 0,524 (antes 0,524); RF 0,743 (0,747); XGBoost 0,745 (0,743); LSTM 0,766 (0,762); GRU 0,768 (0,765); LSTM/GRU − RF ≈ +0,02, vencem 5/6 |
+
+- **Verificado:** a queda do LSTM/GRU na rodada principal vem do **batch
+  2048**, não da GPU (T2: diferença de no máximo 0,008 na média) nem dos dados
+  (T3 reproduz a rodada de 6 pessoas). Com batch 512, LSTM/GRU **empatam**
+  com a RF nas 11 pessoas, em vez de ficar ~0,02 acima como nas 6.
+- **Verificado:** com as mesmas 6 pessoas o resultado é o mesmo da rodada
+  antiga, então o aumento da média (RF 0,747 → 0,787) vem das 5 pessoas novas.
+  Quanto disso é prevalência: ver T4.
+- **Feito:** estatística refeita com batch 512 em `resultados_v2_b512/`
+  (números da tabela acima).
+
+**T4, prevalência** (`resultados_v2_testes/t4_prevalencia.txt`; RF, média por
+grupo de pessoas):
+
+| Grupo | Prevalência | PR-AUC | PR-AUC normalizado (AP−prev)/(1−prev) | ROC-AUC |
+|---|---|---|---|---|
+| P01–P06 | 0,078 | 0,745 | 0,725 | 0,916 |
+| P07–P11 | 0,215 | 0,838 | 0,793 | 0,934 |
+| P02–P06 (sem P01) | 0,076 | 0,795 | 0,781 | 0,938 |
+
+A diferença entre os grupos cai de 0,093 (PR-AUC) para 0,068 (normalizado)
+e 0,018 (ROC-AUC); sem o P01 as pessoas antigas ficam no nível das novas.
+Spearman(prevalência, PR-AUC) entre as 11 pessoas: 0,31 (p = 0,36).
+Conclusão: **parte** do aumento da média vem da prevalência maior das
+pessoas novas; o resto é o P01 (a pessoa mais difícil) pesar menos numa
+média de 11.
+
+**Varredura da janela K (LSTM/GRU, 11 pessoas, GPU batch 512, semente 42;
+`resultados_v2_b512/k_sweep.csv`, seção 7 do report):**
+
+| K | LSTM | GRU | LSTM (6 pessoas) | GRU (6 pessoas) |
+|---|---|---|---|---|
+| 4 | 0,795 | 0,785 | 0,772 | 0,771 |
+| 8 | 0,791 | 0,786 | 0,768 | 0,764 |
+| 16 | 0,799 | 0,786 | 0,761 | 0,768 |
+| 32 | 0,785 | 0,783 | 0,763 | 0,762 |
+
+K quase não importa (variação ≤ 0,014, contra dp entre pessoas de ~0,10–0,13),
+como na rodada de 6 pessoas: 4 ações de histórico já carregam o sinal.
+
+**Direção do movimento** (`train_model.py`, Tarefa 2, split agrupado por
+pessoa, 1 sorteio; treino 37.397 / teste 27.645 moves): cosseno RF 0,566 vs.
+Dead Reckoning 0,549 (6 pessoas: 0,550 vs. 0,540); MAE (dx,dy) 0,8 vs. 5,2
+(antes 0,9 vs. 5,1). Mesma conclusão: a vantagem é na magnitude, não na
+direção.
+
+**Modelo do cliente** (`resultados_v2_b512/modelo_cliente/`: `train.log`,
+`metrics.json`, `model.pkl`, `model.onnx`):
+
+```bash
+python train_model.py --dataset dataset_v2.csv --metrics-out resultados_v2_b512/modelo_cliente/metrics.json \
+    --model-out resultados_v2_b512/modelo_cliente/model.pkl
+python export_onnx.py --model resultados_v2_b512/modelo_cliente/model.pkl --dataset dataset_v2.csv \
+    --out resultados_v2_b512/modelo_cliente/model.onnx
+```
+
+RF treinada nas 11 pessoas. LOPO: PR-AUC 0,788 (limiar 0,5: precisão 0,88,
+recall 0,66). **Limiar do cliente: 0,227** (recall-alvo 0,7 nas predições
+OOF das 11 pessoas → precisão 0,71, recall 0,70; antes 0,143 com precisão
+0,53). Limiares por fold de 0,187 a 0,547 (o de P01 é o 0,547).
+`model.onnx`: 81,5 MB (antes 53,6), saída igual ao sklearn (diferença máx.
+1,8e-7), 0,089 ms por inferência de 1 linha no ONNX Runtime Python (CPU,
+linhas reais, com o MCMC rodando em paralelo; não comparável com os 0,013 ms
+antigos, medidos com entrada aleatória e máquina livre). **Não instalado** em
+`~/tcc/manaverse-local`: inclui todas as pessoas, e para o teste em jogo o
+modelo deve ser treinado sem quem vai jogar.
+
+**Modelo misto por MCMC** (`mixed_model_mcmc.py --dataset dataset_v2.csv
+--out-dir resultados_v2_b512/estatistica/mcmc`; 4 cadeias × (2000 burn-in +
+2000 amostras), target_accept 0,99; 27 + 54 + 52 min). Os 3 modelos
+convergiram: 0 divergências, R-hat ≤ 1,0062, ESS ≥ 1712, E-BFMI ≥ 0,71.
+
+| | 6 pessoas | 11 pessoas |
+|---|---|---|
+| M1: OR de `prev_action_was_attack` | 26,7 [24,1; 29,8] | 22,0 [20,2; 23,8] |
+| M1: σ intercepto / ICC latente | 0,30 / 0,027 | 0,40 [0,26; 0,69] / 0,046 [0,020; 0,125] |
+| M2: σ intercepto | 0,58 [0,33; 1,25] | 0,70 [0,46; 1,17] |
+| M2: σ inclinação de prev | 0,97 [0,58; 1,80] | 0,90 [0,60; 1,46] |
+| M2: OR de prev (pessoa média) | 42,6 [17,0; 96,7] | 29,5 [16,4; 50,7] |
+| M2: ICC latente / MOR | 0,094 / 1,74 | 0,129 [0,061; 0,293] / 1,95 [1,55; 3,05] |
+| M2s (priori larga): σ inclinação | 1,07 [0,60; 2,40] | 0,93 [0,61; 1,64] |
+
+- A diferença entre pessoas está mais em **quanto o ataque anterior prevê o
+  próximo** (inclinação, σ 0,90) do que no nível de base (σ 0,70); igual à
+  rodada de 6 pessoas, agora com ICs mais estreitos.
+- Pessoas com intercepto alto e inclinação negativa (atacam mais "do nada",
+  rajadas menos previsíveis pelo ataque anterior): P01 (+0,53 / −1,06), P07
+  (+0,82 / −0,95), P09 (+1,15 / −1,24). Antes P01 era o único caso
+  (+0,89 / −1,34).
+- M2s ≈ M2: com 11 pessoas a priori de σ quase não pesa mais (com 6 pessoas o
+  IC da inclinação ia até 2,40 com a priori larga).
+- Variacional (seção 4c) × MCMC (M1): ORs iguais até a 3ª casa; σ 0,383 × 0,397.
 
 Mudanças de código nesta rodada: patch `pipeline_grupos_gpu` (`--n-folds`,
 `--lc-*`, `--device`); `statistical_analysis.py` e `export_results_json.py`
